@@ -66,7 +66,7 @@ export function encode(p: Payload): string {
 
   // Edges section.
   if (p.edges.length > 0) {
-    const edgeLines: string[] = [];
+    lines.push('## edges');
     for (const e of p.edges) {
       const srcIdx = symIndex.get(e.source);
       const tgtIdx = symIndex.get(e.target);
@@ -76,11 +76,7 @@ export function encode(p: Payload): string {
       if (e.status && e.status !== 'unchanged') {
         line += ` ${e.status}`;
       }
-      edgeLines.push(line);
-    }
-    if (edgeLines.length > 0) {
-      lines.push('## edges');
-      lines.push(...edgeLines);
+      lines.push(line);
     }
   }
 

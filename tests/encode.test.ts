@@ -122,7 +122,7 @@ describe('encode', () => {
     expect(output).toContain('## distance_5');
   });
 
-  it('skips edges with unknown source/target', () => {
+  it('emits edges header but skips lines with unknown source/target', () => {
     const p: Payload = {
       tool: 'test',
       tokenBudget: 100,
@@ -136,7 +136,10 @@ describe('encode', () => {
     };
 
     const output = encode(p);
-    expect(output).not.toContain('## edges');
+    // Section header emitted (matches Go), but no edge lines beneath it
+    expect(output).toContain('## edges');
+    const afterEdges = output.split('## edges\n')[1];
+    expect(afterEdges.trim()).toBe('');
   });
 
   it('includes edge status when not empty or unchanged', () => {
