@@ -16,9 +16,30 @@ TypeScript implementation of [GCF (Graph Compact Format)](https://github.com/bla
 npm install @blackwell-systems/gcf
 ```
 
-Zero dependencies. TypeScript-first.
+Zero dependencies. TypeScript-first. Includes CLI.
 
-## Quick Start
+## CLI
+
+```bash
+npx @blackwell-systems/gcf encode < payload.json    # JSON to GCF
+npx @blackwell-systems/gcf decode < payload.gcf     # GCF to JSON
+npx @blackwell-systems/gcf stats  < payload.json    # token comparison
+```
+
+```
+Payload: 50 symbols, 20 edges
+
+  JSON  ██████████████████████████████  4,200 tokens
+  GCF   ████████░░░░░░░░░░░░░░░░░░░░░░  1,150 tokens
+
+  Savings: 73% fewer tokens with GCF
+```
+
+Or install globally: `npm install -g @blackwell-systems/gcf` then use `gcf` directly.
+
+## Library
+
+### Quick Start
 
 ```typescript
 import { encode, type Payload } from '@blackwell-systems/gcf';

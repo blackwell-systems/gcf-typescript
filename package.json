@@ -11,6 +11,9 @@
       "import": "./dist/index.js"
     }
   },
+  "bin": {
+    "gcf": "./dist/cli.js"
+  },
   "files": [
     "dist",
     "src",
