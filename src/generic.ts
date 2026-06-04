@@ -6,7 +6,7 @@ function formatValue(value: unknown): string {
   if (value === null || value === undefined) return '-';
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   const s = String(value);
-  if (s.includes('|') || s.includes('\n')) return JSON.stringify(s);
+  if (s.includes('|') || s.includes('\n') || s === '') return JSON.stringify(s);
   return s;
 }
 
