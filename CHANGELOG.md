@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.2.0 (2026-06-03)
+## v0.1.1 (2026-06-03)
 
 - `encodeGeneric`: encode arbitrary JS values into GCF tabular format
 - Tabular encoding: positional rows with pipe separators, section headers, nested field support
