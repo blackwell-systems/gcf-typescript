@@ -119,11 +119,36 @@ const output = encodeDelta(delta);
 
 81.2% savings on re-queries where the pack changed slightly.
 
+## Generic Encoding
+
+Encode any JS value (not just graph payloads) into GCF tabular format:
+
+```typescript
+import { encodeGeneric } from '@blackwell-systems/gcf';
+
+const output = encodeGeneric({
+  employees: [
+    { id: 1, name: 'Alice', department: 'Engineering', salary: 95000 },
+    { id: 2, name: 'Bob', department: 'Sales', salary: 72000 },
+  ],
+});
+```
+
+Output:
+```
+## employees [2]{id,name,department,salary}
+1|Alice|Engineering|95000
+2|Bob|Sales|72000
+```
+
+Works on objects, arrays, and primitives. Arrays of uniform objects get tabular rows. Nested objects use `## key` section headers.
+
 ## API
 
 | Function | Description |
 |----------|-------------|
-| `encode(p: Payload): string` | Encode a payload to GCF text |
+| `encode(p: Payload): string` | Encode a graph payload to GCF text |
+| `encodeGeneric(data: unknown): string` | Encode any value to GCF tabular format |
 | `decode(input: string): Payload` | Parse GCF text back to a Payload |
 | `encodeWithSession(p: Payload, s: Session): string` | Encode with session deduplication |
 | `encodeDelta(d: DeltaPayload): string` | Encode a delta (added/removed only) |
