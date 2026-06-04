@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.1.2 (2026-06-04)
+
+- Fix: quote empty strings as `""` in `encodeGeneric` per spec
+
 ## v0.1.1 (2026-06-03)
 
 - `encodeGeneric`: encode arbitrary JS values into GCF tabular format
