@@ -105,16 +105,13 @@ describe('encodeGeneric', () => {
     expect(encodeGeneric(null)).toBe('null');
   });
 
-  it('encodes non-uniform arrays with @N indices', () => {
+  it('encodes primitive arrays inline', () => {
     const data = {
       mixed: [1, 'two', true],
     };
 
     const output = encodeGeneric(data);
-    expect(output).toContain('## mixed [3]');
-    expect(output).toContain('@0 1');
-    expect(output).toContain('@1 two');
-    expect(output).toContain('@2 true');
+    expect(output).toContain('mixed[3]: 1,two,true');
   });
 
   it('quotes strings containing pipe characters', () => {

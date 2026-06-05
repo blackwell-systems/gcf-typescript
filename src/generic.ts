@@ -96,15 +96,25 @@ function encodeArray(
       }
     }
   } else {
-    // Non-uniform array.
-    lines.push(`${prefix}## ${name} [${arr.length}]`);
-    for (let i = 0; i < arr.length; i++) {
-      const item = arr[i];
-      if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
-        lines.push(`${prefix}@${i}`);
-        encodeObject(item as Record<string, unknown>, null, lines, depth + 1);
-      } else {
-        lines.push(`${prefix}@${i} ${formatValue(item)}`);
+    // Check if all items are primitives (inline as comma-separated).
+    const allPrimitive = arr.length > 0 && arr.every(
+      (item) => item === null || typeof item !== 'object',
+    );
+
+    if (allPrimitive) {
+      const vals = arr.map((item) => formatValue(item));
+      lines.push(`${prefix}${name}[${arr.length}]: ${vals.join(',')}`);
+    } else {
+      // Non-uniform with objects: per-item encoding.
+      lines.push(`${prefix}## ${name} [${arr.length}]`);
+      for (let i = 0; i < arr.length; i++) {
+        const item = arr[i];
+        if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
+          lines.push(`${prefix}@${i}`);
+          encodeObject(item as Record<string, unknown>, null, lines, depth + 1);
+        } else {
+          lines.push(`${prefix}@${i} ${formatValue(item)}`);
+        }
       }
     }
   }
