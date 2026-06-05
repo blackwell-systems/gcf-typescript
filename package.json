@@ -1,6 +1,6 @@
 {
   "name": "@blackwell-systems/gcf",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "TypeScript implementation of GCF (Graph Compact Format) - token-optimized wire format for LLM tool responses",
   "type": "module",
   "main": "./dist/index.js",
