@@ -1,8 +1,13 @@
 # Changelog
 
+## v0.1.3 (2026-06-04)
+
+- Docs: update README for npm/PyPI discoverability (gcformat.com, proxy, vs-toon links)
+
 ## v0.1.2 (2026-06-04)
 
 - Fix: quote empty strings as `""` in `encodeGeneric` per spec
+- Fix: decoder rejects headers missing required `tool` field (conformance)
 
 ## v0.1.1 (2026-06-03)
 

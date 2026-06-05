@@ -26,6 +26,10 @@ export function decode(input: string): Payload {
   // Parse header fields.
   parseHeader(header.slice(4), p);
 
+  if (!p.tool) {
+    throw new Error("gcf: header missing required 'tool' field");
+  }
+
   // Parse body: symbols and edges.
   const symbols: Symbol[] = [];
   const symByID = new Map<number, Symbol>();
