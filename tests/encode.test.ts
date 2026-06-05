@@ -31,12 +31,12 @@ describe('encode', () => {
 
     const output = encode(p);
     const expected = [
-      'GCF tool=context_for_task budget=5000 tokens=1847 symbols=2',
+      'GCF tool=context_for_task budget=5000 tokens=1847 symbols=2 edges=1',
       '## targets',
       '@0 fn pkg.AuthMiddleware 0.78 lsp_resolved',
       '## related',
       '@1 fn pkg.NewServer 0.54 lsp_resolved',
-      '## edges',
+      '## edges [1]',
       '@0<@1 calls',
       '',
     ].join('\n');
@@ -136,10 +136,11 @@ describe('encode', () => {
     };
 
     const output = encode(p);
-    // Section header emitted (matches Go), but no edge lines beneath it
-    expect(output).toContain('## edges');
-    const afterEdges = output.split('## edges\n')[1];
-    expect(afterEdges.trim()).toBe('');
+    // Section header emitted with count 0 (matches Go), no edge lines beneath it
+    expect(output).toContain('## edges [0]');
+    expect(output).toContain('edges=0');
+    const afterEdges = output.split('## edges [0]\n')[1];
+    expect(afterEdges!.trim()).toBe('');
   });
 
   it('includes edge status when not empty or unchanged', () => {

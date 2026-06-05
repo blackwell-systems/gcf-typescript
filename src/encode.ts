@@ -29,18 +29,23 @@ function groupByDistance(symbols: Symbol[]): DistanceGroup[] {
 export function encode(p: Payload): string {
   const lines: string[] = [];
 
-  // Header line.
-  let header = `GCF tool=${p.tool} budget=${p.tokenBudget} tokens=${p.tokensUsed} symbols=${p.symbols.length}`;
-  if (p.packRoot) {
-    header += ` pack_root=${p.packRoot}`;
-  }
-  lines.push(header);
-
   // Build symbol index for edge references.
   const symIndex = new Map<string, number>();
   for (let i = 0; i < p.symbols.length; i++) {
     symIndex.set(p.symbols[i].qualifiedName, i);
   }
+
+  // Count valid edges (both endpoints in symbol index).
+  const validEdges = p.edges.filter(
+    (e) => symIndex.has(e.source) && symIndex.has(e.target)
+  ).length;
+
+  // Header line.
+  let header = `GCF tool=${p.tool} budget=${p.tokenBudget} tokens=${p.tokensUsed} symbols=${p.symbols.length} edges=${validEdges}`;
+  if (p.packRoot) {
+    header += ` pack_root=${p.packRoot}`;
+  }
+  lines.push(header);
 
   // Group symbols by distance.
   const groups = groupByDistance(p.symbols);
@@ -66,7 +71,7 @@ export function encode(p: Payload): string {
 
   // Edges section.
   if (p.edges.length > 0) {
-    lines.push('## edges');
+    lines.push(`## edges [${validEdges}]`);
     for (const e of p.edges) {
       const srcIdx = symIndex.get(e.source);
       const tgtIdx = symIndex.get(e.target);

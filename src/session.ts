@@ -80,7 +80,7 @@ export function encodeWithSession(p: Payload, sess: Session | null): string {
   const lines: string[] = [];
 
   // Header with session=true marker.
-  let header = `GCF tool=${p.tool} budget=${p.tokenBudget} tokens=${p.tokensUsed} symbols=${p.symbols.length} session=true`;
+  let header = `GCF tool=${p.tool} budget=${p.tokenBudget} tokens=${p.tokensUsed} symbols=${p.symbols.length} edges=${p.edges.length} session=true`;
   if (p.packRoot) {
     header += ` pack_root=${p.packRoot}`;
   }
@@ -126,7 +126,7 @@ export function encodeWithSession(p: Payload, sess: Session | null): string {
 
   // Edges section.
   if (p.edges.length > 0) {
-    lines.push('## edges');
+    lines.push(`## edges [${p.edges.length}]`);
     for (const e of p.edges) {
       const srcIdx = localIndex.get(e.source);
       const tgtIdx = localIndex.get(e.target);

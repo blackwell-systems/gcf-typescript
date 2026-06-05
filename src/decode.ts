@@ -42,7 +42,12 @@ export function decode(input: string): Payload {
 
     // Group header.
     if (line.startsWith('## ')) {
-      const group = line.slice(3);
+      let group = line.slice(3);
+      // Strip bracket suffix: "edges [200]" -> "edges"
+      const bracketIdx = group.indexOf(' [');
+      if (bracketIdx >= 0) {
+        group = group.slice(0, bracketIdx);
+      }
       inEdges = group === 'edges';
       if (!inEdges) {
         switch (group) {

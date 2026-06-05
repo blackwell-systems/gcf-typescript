@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.0 (2026-06-05)
+
+- **Breaking**: `encode()` now emits `edges=N` in header line
+- **Breaking**: `encode()` now emits `## edges [N]` section header (was `## edges`)
+- `decode()` updated to parse `## edges [N]` format (strips bracket suffix)
+- Session encoder updated to emit new edge count format
+
 ## v0.1.3 (2026-06-04)
 
 - Docs: update README for npm/PyPI discoverability (gcformat.com, proxy, vs-toon links)
