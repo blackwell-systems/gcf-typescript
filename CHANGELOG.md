@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.5.0 (2026-06-06)
+
+- `decodeGeneric`: decode any GCF text (tabular or graph) back to JS objects
+- `StreamEncoder`: zero-buffering streaming encode (added in v0.4.0)
+
 ## v0.3.0 (2026-06-05)
 
 - `encodeGeneric`: primitive arrays inlined as `name[N]: val1,val2,val3`
