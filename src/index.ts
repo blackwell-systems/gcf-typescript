@@ -5,3 +5,4 @@ export { decode } from './decode.js';
 export { Session, encodeWithSession } from './session.js';
 export { encodeDelta } from './delta.js';
 export { encodeGeneric } from './generic.js';
+export { StreamEncoder, type StreamWriter, type StreamOptions } from './stream.js';
