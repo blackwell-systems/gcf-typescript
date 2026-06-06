@@ -44,33 +44,21 @@ Or install globally: `npm install -g @blackwell-systems/gcf` then use `gcf` dire
 ### Quick Start
 
 ```typescript
-import { encode, type Payload } from '@blackwell-systems/gcf';
+import { encodeGeneric } from '@blackwell-systems/gcf';
 
-const p: Payload = {
-  tool: 'context_for_task',
-  tokenBudget: 5000,
-  tokensUsed: 1847,
-  symbols: [
-    { qualifiedName: 'pkg.AuthMiddleware', kind: 'function', score: 0.78, provenance: 'lsp_resolved', distance: 0 },
-    { qualifiedName: 'pkg.NewServer', kind: 'function', score: 0.54, provenance: 'lsp_resolved', distance: 1 },
+const output = encodeGeneric({
+  employees: [
+    { id: 1, name: 'Alice', department: 'Engineering', salary: 95000 },
+    { id: 2, name: 'Bob', department: 'Sales', salary: 72000 },
   ],
-  edges: [
-    { source: 'pkg.NewServer', target: 'pkg.AuthMiddleware', edgeType: 'calls' },
-  ],
-};
-
-const output = encode(p);
+});
 ```
 
 Output:
 ```
-GCF tool=context_for_task budget=5000 tokens=1847 symbols=2 edges=1
-## targets
-@0 fn pkg.AuthMiddleware 0.78 lsp_resolved
-## related
-@1 fn pkg.NewServer 0.54 lsp_resolved
-## edges [1]
-@0<@1 calls
+## employees [2]{id,name,department,salary}
+1|Alice|Engineering|95000
+2|Bob|Sales|72000
 ```
 
 ## Decode
