@@ -97,6 +97,40 @@ const out2 = encodeWithSession(payload2, sess); // reused symbols as "@N  # prev
 
 By the 5th call in a session: 92.7% token savings vs JSON.
 
+## Streaming Encode
+
+Write GCF output incrementally as symbols and edges arrive. Zero buffering, O(1) memory per row. Ideal for MCP servers that walk large graphs or paginate results:
+
+```typescript
+import { StreamEncoder } from '@blackwell-systems/gcf';
+
+const enc = new StreamEncoder(writer, 'context_for_task', { tokenBudget: 5000 });
+
+// Symbols emit immediately as they're discovered.
+enc.writeSymbol({ qualifiedName: 'pkg.Auth', kind: 'function', score: 0.95, provenance: 'lsp', distance: 0 });
+enc.writeSymbol({ qualifiedName: 'pkg.Server', kind: 'function', score: 0.60, provenance: 'lsp', distance: 1 });
+
+// Edges emit immediately too.
+enc.writeEdge({ source: 'pkg.Server', target: 'pkg.Auth', edgeType: 'calls' });
+
+// Close emits the ## _summary trailer with final counts.
+enc.close();
+```
+
+Output:
+```
+GCF tool=context_for_task budget=5000
+## targets
+@0 fn pkg.Auth 0.95 lsp
+## related
+@1 fn pkg.Server 0.60 lsp
+## edges [?]
+@0<@1 calls
+## _summary symbols=2 edges=1 sections=targets:1,related:1,edges:1
+```
+
+The `writer` is any object with a `write(s: string)` method (Node.js streams, web WritableStreams, or a simple callback). Standard `decode()` handles streaming output with no changes.
+
 ## Delta Encoding
 
 When the consumer already has a prior context pack, send only what changed:
@@ -153,6 +187,7 @@ Works on objects, arrays, and primitives. Arrays of uniform objects get tabular 
 | `encodeGeneric(data: unknown): string` | Encode any value to GCF tabular format |
 | `decode(input: string): Payload` | Parse GCF text back to a Payload |
 | `encodeWithSession(p: Payload, s: Session): string` | Encode with session deduplication |
+| `new StreamEncoder(w, tool, opts)` | Create a streaming encoder (zero-buffering) |
 | `encodeDelta(d: DeltaPayload): string` | Encode a delta (added/removed only) |
 | `new Session()` | Create a new session tracker |
 
