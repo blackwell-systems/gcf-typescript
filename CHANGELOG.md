@@ -1,10 +1,14 @@
 # Changelog
 
+## v0.6.0 (2026-06-06)
+
+- `GenericStreamEncoder`: zero-buffering generic streaming encode (beginArray/writeRow/endArray/writeKV/writeSection/writeInlineArray)
+- Repositioned as drop-in JSON replacement for AI pipelines
+
 ## v0.5.0 (2026-06-06)
 
-- `GenericStreamEncoder`: zero-buffering tabular streaming encode (beginArray/writeRow/endArray/writeKV/writeSection/writeInlineArray)
-- `decodeGeneric`: decode any GCF text (tabular or graph) back to JS objects
-- `StreamEncoder`: zero-buffering streaming encode (added in v0.4.0)
+- `decodeGeneric`: decode any GCF text (generic or graph) back to JS objects
+- `StreamEncoder`: zero-buffering graph streaming encode
 
 ## v0.3.0 (2026-06-05)
 
