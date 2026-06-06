@@ -8,7 +8,7 @@
 
 TypeScript implementation of [GCF (Graph Compact Format)](https://gcformat.com/) — the most token-efficient wire format for LLMs. A drop-in alternative to JSON and TOON for any structured data.
 
-**79% fewer input tokens than JSON. 75% fewer output tokens. 52% smaller than TOON. 100% LLM comprehension at 500 symbols, where JSON fails at 66.7%.**
+**79% fewer input tokens than JSON. 75% fewer output tokens. 52% smaller than TOON. 100% LLM comprehension at 500 symbols, where JSON scores 76.9% and TOON scores 92.3%.**
 
 Docs: [gcformat.com](https://gcformat.com/) · [Playground](https://gcformat.com/playground.html) · [GCF vs TOON](https://gcformat.com/guide/vs-toon.html)
 
@@ -169,15 +169,15 @@ Works on objects, arrays, and primitives. Arrays of uniform objects get tabular 
 
 ## Comprehension Eval
 
-A rigorous 3-way benchmark (GCF vs TOON vs JSON) at 500 symbols, 200 edges. Six structured extraction questions sent to an LLM:
+A rigorous 3-way benchmark (GCF vs TOON vs JSON) at 500 symbols, 200 edges. 13 structured extraction questions sent to an LLM:
 
 | Format | Accuracy | Tokens | vs JSON |
 |--------|----------|--------|---------|
-| **GCF** | **100%** (6/6) | **11,090** | **79% fewer** |
-| TOON | 100% (6/6) | 16,378 | 69% fewer |
-| JSON | 66.7% (4/6) | 53,341 | baseline |
+| **GCF** | **100%** (13/13) | **11,090** | **79% fewer** |
+| TOON | 92.3% (12/13) | 16,378 | 69% fewer |
+| JSON | 76.9% (10/13) | 53,341 | baseline |
 
-JSON failed on counting tasks. GCF and TOON both achieved perfect accuracy. GCF does it in 32% fewer tokens.
+GCF is the only format with perfect accuracy at scale, at 32% fewer tokens than TOON.
 
 ## Token Efficiency (TOON's Own Benchmark)
 
@@ -185,11 +185,11 @@ Running [TOON's benchmark harness](https://github.com/blackwell-systems/toon/tre
 
 | Track | GCF | TOON | Result |
 |-------|-----|------|--------|
-| Mixed-structure (nested, semi-uniform) | 169,554 | 227,896 | **GCF 34% smaller** |
+| Mixed-structure (nested, semi-uniform) | 170,367 | 227,896 | **GCF 34% smaller** |
 | Flat-only (tabular) | 66,026 | 67,837 | **GCF 3% smaller** |
-| Semi-uniform event logs | 107,269 | 154,032 | **GCF 44% smaller** |
+| Semi-uniform event logs | 108,158 | 154,032 | **GCF 42% smaller** |
 
-GCF wins on every dataset except deeply nested config (75 tokens on a 618-token payload). On semi-uniform data, GCF uses 44% fewer tokens than TOON.
+GCF wins all 6 datasets. On semi-uniform data (the most common real-world pattern), GCF uses 42% fewer tokens than TOON.
 
 Reproducible: [blackwell-systems/toon@gcf-comparison](https://github.com/blackwell-systems/toon/tree/gcf-comparison)
 
