@@ -1,7 +1,7 @@
 {
   "name": "@blackwell-systems/gcf",
   "version": "0.6.1",
-  "description": "TypeScript implementation of GCF (Graph Compact Format) - token-optimized wire format for LLM tool responses",
+  "description": "Drop-in JSON replacement for AI pipelines. 79% fewer tokens. 90.5% comprehension across 10 models. Zero dependencies.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
