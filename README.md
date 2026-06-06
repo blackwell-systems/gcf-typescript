@@ -169,7 +169,7 @@ Works on objects, arrays, and primitives. Arrays of uniform objects get tabular 
 
 ## Comprehension Eval
 
-A rigorous 3-way benchmark (GCF vs TOON vs JSON) at 500 symbols, 200 edges. 13 structured extraction questions sent to an LLM:
+Rigorous 3-way benchmark (GCF vs TOON vs JSON) at 500 symbols, 200 edges. 13 structured extraction questions sent to an LLM with zero format instructions:
 
 | Format | Accuracy | Tokens | vs JSON |
 |--------|----------|--------|---------|
@@ -179,6 +179,8 @@ A rigorous 3-way benchmark (GCF vs TOON vs JSON) at 500 symbols, 200 edges. 13 s
 
 GCF is the only format with perfect accuracy at scale, at 32% fewer tokens than TOON.
 
+Reproduce: `git clone https://github.com/blackwell-systems/gcf-go && cd gcf-go/eval && GOWORK=off go test -run TestComprehension -v -timeout 0`
+
 ## Token Efficiency (TOON's Own Benchmark)
 
 Running [TOON's benchmark harness](https://github.com/blackwell-systems/toon/tree/gcf-comparison) with GCF inserted (their datasets, their tokenizer):
@@ -186,12 +188,12 @@ Running [TOON's benchmark harness](https://github.com/blackwell-systems/toon/tre
 | Track | GCF | TOON | Result |
 |-------|-----|------|--------|
 | Mixed-structure (nested, semi-uniform) | 170,367 | 227,896 | **GCF 34% smaller** |
-| Flat-only (tabular) | 66,026 | 67,837 | **GCF 3% smaller** |
+| Flat-only (tabular) | 66,029 | 67,837 | **GCF 3% smaller** |
 | Semi-uniform event logs | 108,158 | 154,032 | **GCF 42% smaller** |
 
 GCF wins all 6 datasets. On semi-uniform data (the most common real-world pattern), GCF uses 42% fewer tokens than TOON.
 
-Reproducible: [blackwell-systems/toon@gcf-comparison](https://github.com/blackwell-systems/toon/tree/gcf-comparison)
+Reproduce: `git clone https://github.com/blackwell-systems/toon && cd toon && git checkout gcf-comparison && cd benchmarks && pnpm install && pnpm benchmark:tokens`
 
 ## Links
 
