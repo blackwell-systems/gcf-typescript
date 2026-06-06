@@ -7,3 +7,4 @@ export { encodeDelta } from './delta.js';
 export { encodeGeneric } from './generic.js';
 export { decodeGeneric } from './decode_generic.js';
 export { StreamEncoder, type StreamWriter, type StreamOptions } from './stream.js';
+export { GenericStreamEncoder } from './stream_generic.js';
