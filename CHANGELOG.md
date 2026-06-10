@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.0.1 (2026-06-10)
+
+- CLI: `encode-generic` and `decode-generic` subcommands for generic profile
+- CLI now supports both graph and generic profiles
+
+## v1.0.0 (2026-06-07)
+
+- SPEC v2.0 implementation: common scalar grammar, full JSON escaping, attachments, expanded form
+- 40M property-based round-trips with zero failures
+- 130/141 conformance fixtures passing
+
 ## v0.6.0 (2026-06-06)
 
 - `GenericStreamEncoder`: zero-buffering generic streaming encode (beginArray/writeRow/endArray/writeKV/writeSection/writeInlineArray)
