@@ -1,4 +1,5 @@
 import type { StreamWriter } from './stream.js';
+import { formatScalar } from './scalar.js';
 
 interface SectionCount {
   name: string;
@@ -78,7 +79,7 @@ export class GenericStreamEncoder {
     this.writer.write(`${name}[${values.length}]: ${parts.join(',')}\n`);
   }
 
-  /** Emit the ## _summary trailer with final counts. Must be called after all data. */
+  /** Emit the ##! summary trailer with final counts. Must be called after all data. */
   close(): void {
     if (this.current !== null) {
       this.endArrayInternal();
@@ -86,13 +87,8 @@ export class GenericStreamEncoder {
     if (this.sections.length === 0) {
       return;
     }
-    let totalRows = 0;
-    const sectionParts: string[] = [];
-    for (const s of this.sections) {
-      sectionParts.push(`${s.name}:${s.count}`);
-      totalRows += s.count;
-    }
-    this.writer.write(`## _summary rows=${totalRows} sections=${sectionParts.join(',')}\n`);
+    const counts = this.sections.map(s => String(s.count));
+    this.writer.write(`##! summary counts=${counts.join(',')}\n`);
   }
 
   private endArrayInternal(): void {
@@ -105,23 +101,5 @@ export class GenericStreamEncoder {
 }
 
 function formatValue(v: unknown): string {
-  if (v === null || v === undefined) {
-    return '-';
-  }
-  if (typeof v === 'boolean') {
-    return v ? 'true' : 'false';
-  }
-  if (typeof v === 'number') {
-    return String(v);
-  }
-  if (typeof v === 'string') {
-    if (v === '') {
-      return '""';
-    }
-    if (v.includes('|') || v.includes('\n')) {
-      return `"${v.replace(/"/g, '\\"')}"`;
-    }
-    return v;
-  }
-  return String(v);
+  return formatScalar(v, 0x7c); // '|' context
 }

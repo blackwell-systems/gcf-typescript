@@ -20,14 +20,14 @@ describe('StreamEncoder', () => {
     enc.close();
 
     const out = output();
-    expect(out).toContain('GCF tool=context_for_task budget=5000\n');
+    expect(out).toContain('GCF profile=graph tool=context_for_task budget=5000\n');
     expect(out).toContain('## targets\n');
     expect(out).toContain('@0 fn pkg.Auth 0.78 lsp_resolved\n');
     expect(out).toContain('## related\n');
     expect(out).toContain('@1 fn pkg.Server 0.54 lsp_resolved\n');
     expect(out).toContain('## edges [?]\n');
     expect(out).toContain('@0<@1 calls\n');
-    expect(out).toContain('## _summary symbols=2 edges=1');
+    expect(out).toContain('##! summary symbols=2 edges=1');
 
     // Header should not have symbols= or edges=
     const header = out.split('\n')[0];
@@ -79,7 +79,7 @@ describe('StreamEncoder', () => {
     expect(out).toContain('## related\n');
     expect(out).toContain('## extended\n');
     expect(out).toContain('## distance_5\n');
-    expect(out).toContain('sections=targets:1,related:1,extended:1,distance_5:1');
+    expect(out).toContain('counts=1,1,1,1');
   });
 
   it('skips edges with unknown references', () => {

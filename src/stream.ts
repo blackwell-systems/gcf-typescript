@@ -48,7 +48,7 @@ export class StreamEncoder {
   }
 
   private writeHeader(tool: string, opts: StreamOptions): void {
-    const parts = [`GCF tool=${tool}`];
+    const parts = [`GCF profile=graph tool=${tool}`];
     if (opts.tokenBudget) parts.push(`budget=${opts.tokenBudget}`);
     if (opts.tokensUsed) parts.push(`tokens=${opts.tokensUsed}`);
     if (opts.packRoot) parts.push(`pack_root=${opts.packRoot}`);
@@ -125,25 +125,25 @@ export class StreamEncoder {
   }
 
   /**
-   * Emit the ## _summary trailer with final counts. Must be called after all
+   * Emit the ##! summary trailer with final counts. Must be called after all
    * symbols and edges have been written.
    */
   close(): void {
-    const sections: string[] = [];
+    const deferredCounts: number[] = [];
     const groupOrder = ['targets', 'related', 'extended'];
 
     for (const g of groupOrder) {
       const c = this.groupCounts.get(g);
-      if (c && c > 0) sections.push(`${g}:${c}`);
+      if (c && c > 0) deferredCounts.push(c);
     }
     for (const [g, c] of this.groupCounts) {
-      if (!groupOrder.includes(g) && c > 0) sections.push(`${g}:${c}`);
+      if (!groupOrder.includes(g) && c > 0) deferredCounts.push(c);
     }
     if (this.edgeCount > 0) {
-      sections.push(`edges:${this.edgeCount}`);
+      deferredCounts.push(this.edgeCount);
     }
 
-    this.w.write(`## _summary symbols=${this.nextID} edges=${this.edgeCount} sections=${sections.join(',')}\n`);
+    this.w.write(`##! summary symbols=${this.nextID} edges=${this.edgeCount} counts=${deferredCounts.join(',')}\n`);
   }
 
   /** Number of symbols written so far. */

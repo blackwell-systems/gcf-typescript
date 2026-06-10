@@ -13,7 +13,7 @@ export function encodeDelta(d: DeltaPayload): string {
     savings = Math.round(100 * (1 - d.deltaTokens / d.fullTokens));
   }
   lines.push(
-    `GCF tool=${d.tool} delta=true base_root=${d.baseRoot} new_root=${d.newRoot} tokens=${d.deltaTokens} savings=${savings}%`
+    `GCF profile=graph tool=${d.tool} delta=true base_root=${d.baseRoot} new_root=${d.newRoot} tokens=${d.deltaTokens} savings=${savings}%`
   );
 
   // Removed symbols: short references (consumer already has the full declaration).

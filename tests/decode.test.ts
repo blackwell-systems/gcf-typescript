@@ -4,7 +4,7 @@ import { decode } from '../src/decode.js';
 describe('decode', () => {
   it('decodes a basic payload', () => {
     const input = [
-      'GCF tool=context_for_task budget=5000 tokens=1847 symbols=2',
+      'GCF profile=graph tool=context_for_task budget=5000 tokens=1847 symbols=2',
       '## targets',
       '@0 fn pkg.AuthMiddleware 0.78 lsp_resolved',
       '## related',
@@ -33,7 +33,7 @@ describe('decode', () => {
 
   it('decodes with pack_root', () => {
     const input = [
-      'GCF tool=test budget=100 tokens=50 symbols=1 pack_root=abc123',
+      'GCF profile=graph tool=test budget=100 tokens=50 symbols=1 pack_root=abc123',
       '## targets',
       '@0 fn pkg.Func 0.90 rwr',
     ].join('\n');
@@ -44,7 +44,7 @@ describe('decode', () => {
 
   it('expands kind abbreviations', () => {
     const input = [
-      'GCF tool=test budget=100 tokens=50 symbols=4',
+      'GCF profile=graph tool=test budget=100 tokens=50 symbols=4',
       '## targets',
       '@0 iface pkg.Handler 0.90 rwr',
       '@1 route pkg.Get 0.80 rwr',
@@ -61,7 +61,7 @@ describe('decode', () => {
 
   it('handles distance_N groups', () => {
     const input = [
-      'GCF tool=test budget=100 tokens=50 symbols=2',
+      'GCF profile=graph tool=test budget=100 tokens=50 symbols=2',
       '## targets',
       '@0 fn pkg.A 0.90 rwr',
       '## distance_4',
@@ -75,7 +75,7 @@ describe('decode', () => {
 
   it('ignores comments', () => {
     const input = [
-      'GCF tool=test budget=100 tokens=50 symbols=1',
+      'GCF profile=graph tool=test budget=100 tokens=50 symbols=1',
       '# This is a comment',
       '## targets',
       '@0 fn pkg.Func 0.90 rwr',
@@ -87,7 +87,7 @@ describe('decode', () => {
 
   it('handles CRLF line endings', () => {
     const input =
-      'GCF tool=test budget=100 tokens=50 symbols=1\r\n' +
+      'GCF profile=graph tool=test budget=100 tokens=50 symbols=1\r\n' +
       '## targets\r\n' +
       '@0 fn pkg.Func 0.90 rwr\r\n';
 
@@ -98,7 +98,7 @@ describe('decode', () => {
 
   it('decodes edge with status', () => {
     const input = [
-      'GCF tool=test budget=100 tokens=50 symbols=2',
+      'GCF profile=graph tool=test budget=100 tokens=50 symbols=2',
       '## targets',
       '@0 fn pkg.A 0.90 rwr',
       '@1 fn pkg.B 0.80 rwr',
@@ -120,7 +120,7 @@ describe('decode', () => {
 
   it('throws on malformed symbol line', () => {
     const input = [
-      'GCF tool=test budget=100 tokens=50 symbols=1',
+      'GCF profile=graph tool=test budget=100 tokens=50 symbols=1',
       '## targets',
       '@0 fn',
     ].join('\n');
@@ -130,7 +130,7 @@ describe('decode', () => {
 
   it('throws on edge referencing unknown symbol', () => {
     const input = [
-      'GCF tool=test budget=100 tokens=50 symbols=1',
+      'GCF profile=graph tool=test budget=100 tokens=50 symbols=1',
       '## targets',
       '@0 fn pkg.A 0.90 rwr',
       '## edges',

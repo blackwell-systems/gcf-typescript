@@ -27,8 +27,12 @@ export function decode(input: string): Payload {
   parseHeader(header.slice(4), p);
 
   if (!p.tool) {
-    throw new Error("gcf: header missing required 'tool' field");
+    throw new Error("missing_tool: header missing required 'tool' field");
   }
+
+  // Detect delta mode.
+  const isDelta = header.includes(' delta=true');
+  const validDeltaSections = new Set(['removed', 'added', 'edges_removed', 'edges_added']);
 
   // Parse body: symbols and edges.
   const symbols: Symbol[] = [];
@@ -40,6 +44,9 @@ export function decode(input: string): Payload {
     let line = lines[i].replace(/\r$/, '');
     if (line === '') continue;
 
+    // Skip ##! summary trailer.
+    if (line.startsWith('##! ')) continue;
+
     // Group header.
     if (line.startsWith('## ')) {
       let group = line.slice(3);
@@ -48,6 +55,11 @@ export function decode(input: string): Payload {
       if (bracketIdx >= 0) {
         group = group.slice(0, bracketIdx);
       }
+
+      if (isDelta && !validDeltaSections.has(group)) {
+        throw new Error(`malformed_delta: invalid delta section "${group}"`);
+      }
+
       inEdges = group === 'edges';
       if (!inEdges) {
         switch (group) {
@@ -137,14 +149,14 @@ function parseSymbolLine(
   const parts = line.split(/\s+/);
   if (parts.length < 5) {
     throw new Error(
-      `gcf: symbol line needs at least 5 fields, got ${parts.length} in "${line}"`
+      `invalid_node_line: symbol line needs at least 5 fields, got ${parts.length} in "${line}"`
     );
   }
 
   const idStr = parts[0].slice(1); // strip @
   const id = parseInt(idStr, 10);
   if (isNaN(id)) {
-    throw new Error(`gcf: invalid symbol id "${idStr}"`);
+    throw new Error(`invalid_symbol_id: invalid symbol id "${idStr}"`);
   }
 
   let kind = parts[1];
@@ -156,7 +168,7 @@ function parseSymbolLine(
 
   const score = parseFloat(parts[3]);
   if (isNaN(score)) {
-    throw new Error(`gcf: invalid score "${parts[3]}"`);
+    throw new Error(`invalid_score: invalid score "${parts[3]}"`);
   }
 
   const provenance = parts[4];
@@ -182,7 +194,7 @@ function parseEdgeLine(line: string, symByID: Map<number, Symbol>): Edge {
   const ref = parts[0];
   const ltIdx = ref.indexOf('<');
   if (ltIdx < 0) {
-    throw new Error(`gcf: edge line missing '<' separator in "${ref}"`);
+    throw new Error(`invalid_edge_syntax: edge line missing '<' separator in "${ref}"`);
   }
 
   const targetIDStr = ref.slice(1, ltIdx); // strip leading @
@@ -201,7 +213,7 @@ function parseEdgeLine(line: string, symByID: Map<number, Symbol>): Edge {
   const sourceSym = symByID.get(sourceID);
   if (!targetSym || !sourceSym) {
     throw new Error(
-      `gcf: edge references unknown symbol id(s): target=${targetID} source=${sourceID}`
+      `unknown_edge_reference: edge references unknown symbol id(s): target=${targetID} source=${sourceID}`
     );
   }
 

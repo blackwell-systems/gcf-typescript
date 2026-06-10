@@ -51,13 +51,12 @@ describe('encodeGeneric', () => {
     };
 
     const output = encodeGeneric(data);
+    expect(output).toContain('GCF profile=generic');
     expect(output).toContain('project=alpha');
-    // Tabular array with nested field: uses @N prefix.
-    expect(output).toContain('## tasks [2]{id,title}');
-    expect(output).toContain('@0 1|Setup');
-    expect(output).toContain('@1 2|Build');
-    // Nested assignee objects.
-    expect(output).toContain('## assignee');
+    // Tabular array with nested field: uses ^ and .field {} attachment.
+    expect(output).toContain('## tasks [2]{id,title,assignee}');
+    expect(output).toContain('@0 1|Setup|^');
+    expect(output).toContain('.assignee {}');
     expect(output).toContain('name=Alice');
     expect(output).toContain('name=Bob');
   });
@@ -98,11 +97,11 @@ describe('encodeGeneric', () => {
     }
   });
 
-  it('encodes primitive values directly', () => {
-    expect(encodeGeneric(42)).toBe('42');
-    expect(encodeGeneric('hello')).toBe('hello');
-    expect(encodeGeneric(true)).toBe('true');
-    expect(encodeGeneric(null)).toBe('null');
+  it('encodes primitive values as root scalars', () => {
+    expect(encodeGeneric(42)).toBe('GCF profile=generic\n=42\n');
+    expect(encodeGeneric('hello')).toBe('GCF profile=generic\n=hello\n');
+    expect(encodeGeneric(true)).toBe('GCF profile=generic\n=true\n');
+    expect(encodeGeneric(null)).toBe('GCF profile=generic\n=-\n');
   });
 
   it('encodes primitive arrays inline', () => {

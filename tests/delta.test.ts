@@ -26,7 +26,7 @@ describe('encodeDelta', () => {
 
     const output = encodeDelta(d);
 
-    expect(output).toContain('GCF tool=context_for_task delta=true base_root=aaa111 new_root=bbb222 tokens=30 savings=85%');
+    expect(output).toContain('GCF profile=graph tool=context_for_task delta=true base_root=aaa111 new_root=bbb222 tokens=30 savings=85%');
     expect(output).toContain('## removed');
     expect(output).toContain('fn pkg.OldHandler');
     expect(output).toContain('## added');

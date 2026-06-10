@@ -1,164 +1,163 @@
 /**
- * Generic encoder: converts any JS value into GCF tabular format.
+ * Generic encoder: converts any JS value into GCF v2.0 generic profile.
  */
-
-function formatValue(value: unknown): string {
-  if (value === null || value === undefined) return '-';
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  const s = String(value);
-  if (s.includes('|') || s.includes('\n') || s === '') return JSON.stringify(s);
-  return s;
-}
+import { formatScalar, formatKey, ATTACHMENT } from './scalar.js';
 
 function indent(depth: number): string {
   return '  '.repeat(depth);
 }
 
-function isUniformObjectArray(arr: unknown[]): boolean {
-  if (arr.length === 0) return false;
-  const objects = arr.filter(
-    (item): item is Record<string, unknown> =>
-      typeof item === 'object' && item !== null && !Array.isArray(item),
-  );
-  if (objects.length !== arr.length) return false;
-
-  const referenceKeys = Object.keys(objects[0]).sort().join(',');
-  const sampleSize = Math.min(5, objects.length);
-  const refSet = new Set(Object.keys(objects[0]));
-
-  for (let i = 1; i < sampleSize; i++) {
-    const keys = Object.keys(objects[i]);
-    const currentSet = new Set(keys);
-    // 70% overlap check.
-    const union = new Set([...refSet, ...currentSet]);
-    const intersection = [...refSet].filter((k) => currentSet.has(k));
-    if (intersection.length / union.size < 0.7) return false;
-  }
-
-  return true;
-}
-
-function encodeArray(
-  arr: unknown[],
-  name: string,
-  lines: string[],
-  depth: number,
-): void {
-  const prefix = indent(depth);
-
-  if (isUniformObjectArray(arr)) {
-    const objects = arr as Record<string, unknown>[];
-
-    // Collect all keys across items.
-    const allKeys = new Set<string>();
-    for (const obj of objects) {
-      for (const k of Object.keys(obj)) allKeys.add(k);
-    }
-
-    // Separate primitive fields from nested fields.
-    const primitiveFields: string[] = [];
-    const nestedFields: string[] = [];
-    for (const key of allKeys) {
-      const sample = objects.find((o) => o[key] !== undefined)?.[key];
-      if (
-        typeof sample === 'object' &&
-        sample !== null
-      ) {
-        nestedFields.push(key);
-      } else {
-        primitiveFields.push(key);
-      }
-    }
-
-    lines.push(`${prefix}## ${name} [${arr.length}]{${primitiveFields.join(',')}}`);
-
-    if (nestedFields.length === 0) {
-      // Pure flat rows: no @id prefix.
-      for (const obj of objects) {
-        const vals = primitiveFields.map((f) => formatValue(obj[f]));
-        lines.push(`${prefix}${vals.join('|')}`);
-      }
-    } else {
-      // Rows with nested fields: @N prefix.
-      for (let i = 0; i < objects.length; i++) {
-        const obj = objects[i];
-        const vals = primitiveFields.map((f) => formatValue(obj[f]));
-        lines.push(`${prefix}@${i} ${vals.join('|')}`);
-        for (const nk of nestedFields) {
-          const nv = obj[nk];
-          if (nv === undefined || nv === null) continue;
-          if (Array.isArray(nv)) {
-            encodeArray(nv, nk, lines, depth + 1);
-          } else if (typeof nv === 'object') {
-            encodeObject(nv as Record<string, unknown>, nk, lines, depth + 1);
-          }
-        }
-      }
-    }
-  } else {
-    // Check if all items are primitives (inline as comma-separated).
-    const allPrimitive = arr.length > 0 && arr.every(
-      (item) => item === null || typeof item !== 'object',
-    );
-
-    if (allPrimitive) {
-      const vals = arr.map((item) => formatValue(item));
-      lines.push(`${prefix}${name}[${arr.length}]: ${vals.join(',')}`);
-    } else {
-      // Non-uniform with objects: per-item encoding.
-      lines.push(`${prefix}## ${name} [${arr.length}]`);
-      for (let i = 0; i < arr.length; i++) {
-        const item = arr[i];
-        if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
-          lines.push(`${prefix}@${i}`);
-          encodeObject(item as Record<string, unknown>, null, lines, depth + 1);
-        } else {
-          lines.push(`${prefix}@${i} ${formatValue(item)}`);
-        }
-      }
-    }
-  }
-}
-
-function encodeObject(
-  obj: Record<string, unknown>,
-  name: string | null,
-  lines: string[],
-  depth: number,
-): void {
-  const prefix = indent(depth);
-
-  if (name !== null) {
-    lines.push(`${prefix}## ${name}`);
-  }
-
-  for (const [key, value] of Object.entries(obj)) {
-    if (Array.isArray(value)) {
-      encodeArray(value, key, lines, depth);
-    } else if (typeof value === 'object' && value !== null) {
-      encodeObject(value as Record<string, unknown>, key, lines, depth + 1);
-    } else {
-      lines.push(`${prefix}${key}=${formatValue(value)}`);
-    }
-  }
-}
-
-/**
- * Encode any JS value into GCF tabular format.
- */
 export function encodeGeneric(data: unknown): string {
-  // Primitives.
-  if (data === null || data === undefined || typeof data !== 'object') {
-    return String(data);
+  let out = 'GCF profile=generic\n';
+  out += encodeRootValue(data);
+  return out;
+}
+
+function encodeRootValue(v: unknown): string {
+  if (v === null || v === undefined) return '=-\n';
+  if (Array.isArray(v)) return encodeRootArray(v);
+  if (typeof v === 'object') return encodeObject(v as Record<string, unknown>, 0);
+  return `=${formatScalar(v, 0)}\n`;
+}
+
+function encodeObject(obj: Record<string, unknown>, depth: number): string {
+  const prefix = indent(depth);
+  let out = '';
+  for (const key of Object.keys(obj)) {
+    const value = obj[key];
+    const fk = formatKey(key);
+    if (Array.isArray(value)) {
+      out += encodeNamedArray(fk, value, depth);
+    } else if (typeof value === 'object' && value !== null) {
+      out += `${prefix}## ${fk}\n`;
+      out += encodeObject(value as Record<string, unknown>, depth + 1);
+    } else {
+      out += `${prefix}${fk}=${formatScalar(value, 0)}\n`;
+    }
   }
+  return out;
+}
 
-  const lines: string[] = [];
-
-  if (Array.isArray(data)) {
-    encodeArray(data, 'root', lines, 0);
-  } else {
-    encodeObject(data as Record<string, unknown>, null, lines, 0);
+function encodeRootArray(arr: unknown[]): string {
+  if (arr.length === 0) return '## [0]\n';
+  if (allPrimitives(arr)) {
+    const vals = arr.map(v => formatScalar(v, 0x2c));
+    return `## [${arr.length}]: ${vals.join(',')}\n`;
   }
+  const fields = tabularFields(arr);
+  if (fields) return encodeTabular('## ', arr, fields, 0);
+  return encodeExpanded('## ', arr, 0);
+}
 
-  return lines.join('\n') + '\n';
+function encodeNamedArray(name: string, arr: unknown[], depth: number): string {
+  const prefix = indent(depth);
+  if (arr.length === 0) return `${prefix}## ${name} [0]\n`;
+  if (allPrimitives(arr)) {
+    const vals = arr.map(v => formatScalar(v, 0x2c));
+    return `${prefix}${name}[${arr.length}]: ${vals.join(',')}\n`;
+  }
+  const fields = tabularFields(arr);
+  if (fields) return encodeTabular(`${prefix}## ${name} `, arr, fields, depth);
+  return encodeExpanded(`${prefix}## ${name} `, arr, depth);
+}
+
+function tabularFields(arr: unknown[]): string[] | null {
+  if (arr.length === 0) return null;
+  const fieldOrder: string[] = [];
+  const seen = new Set<string>();
+  for (const item of arr) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) return null;
+    for (const k of Object.keys(item as Record<string, unknown>)) {
+      if (!seen.has(k)) { fieldOrder.push(k); seen.add(k); }
+    }
+  }
+  return fieldOrder.length > 0 ? fieldOrder : null;
+}
+
+function encodeTabular(headerPrefix: string, arr: unknown[], fields: string[], depth: number): string {
+  const prefix = indent(depth);
+  const fmtFields = fields.map(f => formatKey(f));
+  let out = `${headerPrefix}[${arr.length}]{${fmtFields.join(',')}}\n`;
+
+  for (let i = 0; i < arr.length; i++) {
+    const obj = arr[i] as Record<string, unknown>;
+    const cells: string[] = [];
+    const attachments: { name: string; value: unknown }[] = [];
+    let rowHasAttachment = false;
+
+    for (const f of fields) {
+      if (!(f in obj)) { cells.push('~'); continue; }
+      const v = obj[f];
+      if (v === null || v === undefined) { cells.push('-'); continue; }
+      if (typeof v === 'object') {
+        cells.push('^');
+        attachments.push({ name: f, value: v });
+        rowHasAttachment = true;
+      } else {
+        cells.push(formatScalar(v, 0x7c));
+      }
+    }
+
+    const row = cells.join('|');
+    if (rowHasAttachment) {
+      out += `${prefix}@${i} ${row}\n`;
+    } else {
+      out += `${prefix}${row}\n`;
+    }
+
+    for (const att of attachments) {
+      const attPrefix = prefix + '  ';
+      const fk = formatKey(att.name);
+      if (Array.isArray(att.value)) {
+        out += encodeAttachmentArray(attPrefix, fk, att.value as unknown[], depth + 2);
+      } else {
+        out += `${attPrefix}.${fk} {}\n`;
+        out += encodeObject(att.value as Record<string, unknown>, depth + 2);
+      }
+    }
+  }
+  return out;
+}
+
+function encodeAttachmentArray(attPrefix: string, fk: string, arr: unknown[], depth: number): string {
+  if (arr.length === 0) return `${attPrefix}.${fk} [0]\n`;
+  if (allPrimitives(arr)) {
+    const vals = arr.map(v => formatScalar(v, 0x2c));
+    return `${attPrefix}.${fk} [${arr.length}]: ${vals.join(',')}\n`;
+  }
+  const fields = tabularFields(arr);
+  if (fields) return encodeTabular(`${attPrefix}.${fk} `, arr, fields, depth);
+  return encodeExpanded(`${attPrefix}.${fk} `, arr, depth);
+}
+
+function encodeExpanded(headerPrefix: string, arr: unknown[], depth: number): string {
+  const prefix = indent(depth);
+  let out = `${headerPrefix}[${arr.length}]\n`;
+  for (let i = 0; i < arr.length; i++) {
+    const item = arr[i];
+    if (Array.isArray(item)) {
+      out += encodeExpandedArrayItem(prefix, i, item, depth);
+    } else if (typeof item === 'object' && item !== null) {
+      out += `${prefix}@${i} {}\n`;
+      out += encodeObject(item as Record<string, unknown>, depth + 1);
+    } else {
+      out += `${prefix}@${i} =${formatScalar(item, 0)}\n`;
+    }
+  }
+  return out;
+}
+
+function encodeExpandedArrayItem(prefix: string, idx: number, arr: unknown[], depth: number): string {
+  if (arr.length === 0) return `${prefix}@${idx} [0]\n`;
+  if (allPrimitives(arr)) {
+    const vals = arr.map(v => formatScalar(v, 0x2c));
+    return `${prefix}@${idx} [${arr.length}]: ${vals.join(',')}\n`;
+  }
+  const fields = tabularFields(arr);
+  if (fields) return encodeTabular(`${prefix}@${idx} `, arr, fields, depth + 1);
+  return encodeExpanded(`${prefix}@${idx} `, arr, depth + 1);
+}
+
+function allPrimitives(arr: unknown[]): boolean {
+  return arr.every(v => typeof v !== 'object' || v === null);
 }

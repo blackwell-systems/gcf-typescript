@@ -9,10 +9,16 @@ interface DistanceGroup {
 function groupByDistance(symbols: Symbol[]): DistanceGroup[] {
   if (symbols.length === 0) return [];
 
+  // Sort by distance ascending, then score descending.
+  const sorted = [...symbols].sort((a, b) => {
+    if (a.distance !== b.distance) return a.distance - b.distance;
+    return b.score - a.score;
+  });
+
   const groups: DistanceGroup[] = [];
   let current: DistanceGroup | null = null;
 
-  for (const s of symbols) {
+  for (const s of sorted) {
     if (current === null || current.distance !== s.distance) {
       current = { distance: s.distance, symbols: [] };
       groups.push(current);
@@ -29,10 +35,14 @@ function groupByDistance(symbols: Symbol[]): DistanceGroup[] {
 export function encode(p: Payload): string {
   const lines: string[] = [];
 
-  // Build symbol index for edge references.
+  // Group and sort first, then build index in output order.
+  const groups = groupByDistance(p.symbols);
   const symIndex = new Map<string, number>();
-  for (let i = 0; i < p.symbols.length; i++) {
-    symIndex.set(p.symbols[i].qualifiedName, i);
+  let nextID = 0;
+  for (const g of groups) {
+    for (const s of g.symbols) {
+      symIndex.set(s.qualifiedName, nextID++);
+    }
   }
 
   // Count valid edges (both endpoints in symbol index).
@@ -41,14 +51,16 @@ export function encode(p: Payload): string {
   ).length;
 
   // Header line.
-  let header = `GCF tool=${p.tool} budget=${p.tokenBudget} tokens=${p.tokensUsed} symbols=${p.symbols.length} edges=${validEdges}`;
+  let header = `GCF profile=graph tool=${p.tool}`;
+  if (p.tokenBudget) header += ` budget=${p.tokenBudget}`;
+  if (p.tokensUsed) header += ` tokens=${p.tokensUsed}`;
+  header += ` symbols=${p.symbols.length}`;
+  if (validEdges > 0) header += ` edges=${validEdges}`;
   if (p.packRoot) {
     header += ` pack_root=${p.packRoot}`;
   }
   lines.push(header);
 
-  // Group symbols by distance.
-  const groups = groupByDistance(p.symbols);
   const groupNames = ['targets', 'related', 'extended'];
 
   for (const g of groups) {

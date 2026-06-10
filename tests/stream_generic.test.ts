@@ -24,7 +24,7 @@ describe('GenericStreamEncoder', () => {
     const out = output();
     expect(out).toContain('## employees [?]{id,name,department,salary}');
     expect(out).toContain('1|Alice|Engineering|95000');
-    expect(out).toContain('## _summary rows=3 sections=employees:3');
+    expect(out).toContain('##! summary counts=3');
   });
 
   it('encodes KV and inline arrays', () => {
@@ -73,7 +73,7 @@ describe('GenericStreamEncoder', () => {
     enc.close();
 
     const out = output();
-    expect(out).toContain('sections=users:2,roles:1');
+    expect(out).toContain('counts=2,1');
   });
 
   it('handles null and boolean values', () => {
@@ -115,7 +115,7 @@ describe('GenericStreamEncoder', () => {
     enc.close();
 
     const out = output();
-    expect(out).toContain('sections=first:1,second:1');
+    expect(out).toContain('counts=1,1');
   });
 
   it('writeSection auto-closes current array', () => {
@@ -130,6 +130,6 @@ describe('GenericStreamEncoder', () => {
 
     const out = output();
     expect(out).toContain('## metadata');
-    expect(out).toContain('## _summary rows=1 sections=items:1');
+    expect(out).toContain('##! summary counts=1');
   });
 });

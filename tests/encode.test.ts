@@ -31,7 +31,7 @@ describe('encode', () => {
 
     const output = encode(p);
     const expected = [
-      'GCF tool=context_for_task budget=5000 tokens=1847 symbols=2 edges=1',
+      'GCF profile=graph tool=context_for_task budget=5000 tokens=1847 symbols=2 edges=1',
       '## targets',
       '@0 fn pkg.AuthMiddleware 0.78 lsp_resolved',
       '## related',
@@ -138,7 +138,7 @@ describe('encode', () => {
     const output = encode(p);
     // Section header emitted with count 0 (matches Go), no edge lines beneath it
     expect(output).toContain('## edges [0]');
-    expect(output).toContain('edges=0');
+    // edges=0 omitted when zero per v2.0
     const afterEdges = output.split('## edges [0]\n')[1];
     expect(afterEdges!.trim()).toBe('');
   });
