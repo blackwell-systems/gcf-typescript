@@ -14,9 +14,18 @@ jobs:
         node-version: ['18', '20', '22']
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: blackwell-systems/gcf
+          path: gcf
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
       - run: npm ci
-      - run: npm test
       - run: npx tsc --noEmit
+      - name: Unit tests
+        run: npx vitest run --reporter=verbose --exclude tests/conformance_v2.test.ts --exclude tests/roundtrip.test.ts
+      - name: Conformance tests (133 fixtures)
+        run: npx vitest run tests/conformance_v2.test.ts --reporter=verbose
+      - name: Property-based round-trip (100K random + 100K adversarial)
+        run: npx vitest run tests/roundtrip.test.ts --reporter=verbose
