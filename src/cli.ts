@@ -6,19 +6,25 @@
 import { readFileSync } from 'node:fs';
 import { encode } from './encode.js';
 import { decode } from './decode.js';
+import { encodeGeneric } from './generic.js';
+import { decodeGeneric } from './decode_generic.js';
 import type { Payload, Symbol, Edge } from './types.js';
 
 const USAGE = `gcf - token-optimized wire format for LLM tool responses
 
 Usage:
-  gcf encode [file]    Encode JSON payload to GCF (stdin if no file)
-  gcf decode [file]    Decode GCF text to JSON (stdin if no file)
-  gcf stats  [file]    Compare token counts: JSON vs GCF (stdin if no file)
-  gcf version          Print version
+  gcf encode [file]           Encode JSON graph payload to GCF (stdin if no file)
+  gcf decode [file]           Decode GCF graph text to JSON (stdin if no file)
+  gcf encode-generic [file]   Encode generic JSON to GCF (stdin if no file)
+  gcf decode-generic [file]   Decode generic GCF to JSON (stdin if no file)
+  gcf stats  [file]           Compare token counts: JSON vs GCF (stdin if no file)
+  gcf version                 Print version
 
 Examples:
   gcf encode < payload.json
   gcf decode < payload.gcf
+  gcf encode-generic < data.json
+  gcf decode-generic < data.gcf
   gcf stats payload.json
 `;
 
@@ -113,6 +119,12 @@ switch (cmd) {
     break;
   case 'decode':
     doDecode(readInput(args.slice(1)));
+    break;
+  case 'encode-generic':
+    process.stdout.write(encodeGeneric(JSON.parse(readInput(args.slice(1)))));
+    break;
+  case 'decode-generic':
+    console.log(JSON.stringify(decodeGeneric(readInput(args.slice(1))), null, 2));
     break;
   case 'stats':
     doStats(readInput(args.slice(1)));
