@@ -1,7 +1,7 @@
 {
   "name": "@blackwell-systems/gcf",
-  "version": "1.0.0",
-  "description": "Drop-in JSON replacement for AI pipelines. 79% fewer tokens. 90.5% comprehension across 10 models. Zero dependencies.",
+  "version": "1.0.1",
+  "description": "Drop-in JSON replacement for AI pipelines. 79% fewer tokens. 90.7% comprehension across 10 models. Zero dependencies.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
