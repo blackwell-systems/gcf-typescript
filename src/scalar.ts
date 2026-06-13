@@ -4,7 +4,7 @@
  */
 
 const JSON_NUMBER_RE = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
-const NUMERIC_LIKE_RE = /^[+-]?\.?\d/;
+const NUMERIC_LIKE_RE = /^[+-]\.?\d|^\.\d|^0\d/;
 
 /** Check if a string value must be quoted per Section 2.4. */
 export function needsQuote(s: string): boolean {
@@ -17,7 +17,7 @@ export function needsQuote(s: string): boolean {
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i);
     if (c === 0x22 || c === 0x5c || c < 0x20 || c === 0x0a || c === 0x0d ||
-        c === 0x7c || c === 0x2c) return true; // " \ control \n \r | ,
+        c === 0x7c) return true; // " \ control \n \r |
     // C1 control characters
     if (c >= 0x80 && c <= 0x9f) return true;
     // Unicode whitespace beyond ASCII

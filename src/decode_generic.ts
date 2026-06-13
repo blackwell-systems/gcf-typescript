@@ -342,9 +342,7 @@ function parseTabularBody(lines: string[], start: number, depth: number, fields:
       while (i < lines.length && attachmentValues.size < allAttFields.length) {
         const aLine = lines[i];
         let aContent: string | null = null;
-        if (aLine.startsWith(ind + '  ')) {
-          aContent = aLine.slice(ind.length + 2);
-        } else if (depth === 0 || aLine.startsWith(ind)) {
+        if (depth === 0 || aLine.startsWith(ind)) {
           aContent = depth > 0 ? aLine.slice(ind.length) : aLine;
         } else {
           break;
