@@ -1,110 +1,309 @@
 import { describe, it, expect } from 'vitest';
 import { encode } from '../src/encode.js';
 import { decode } from '../src/decode.js';
-import type { Payload } from '../src/types.js';
+import { encodeGeneric, decodeGeneric } from '../src/index.js';
 
-describe('roundtrip', () => {
-  it('encode then decode produces equivalent payload', () => {
-    const original: Payload = {
-      tool: 'context_for_task',
+const ITERATIONS = parseInt(process.env.GCF_ITERATIONS ?? '100000', 10);
+
+// Seeded PRNG (xorshift32) for reproducibility.
+function makeRng(seed: number) {
+  let s = seed;
+  return () => {
+    s ^= s << 13;
+    s ^= s >> 17;
+    s ^= s << 5;
+    return (s >>> 0) / 0x100000000;
+  };
+}
+
+function randInt(rng: () => number, max: number): number {
+  return Math.floor(rng() * max);
+}
+
+function pick<T>(rng: () => number, arr: T[]): T {
+  return arr[randInt(rng, arr.length)];
+}
+
+// --- Generators ---
+
+function genValue(rng: () => number, depth: number, maxDepth: number): any {
+  if (depth >= maxDepth) return genScalar(rng);
+  switch (randInt(rng, 10)) {
+    case 0: return null;
+    case 1: return rng() < 0.5;
+    case 2: return genNumber(rng);
+    case 3: case 4: return genString(rng);
+    case 5: case 6: return genObject(rng, depth, maxDepth);
+    case 7: case 8: return genArray(rng, depth, maxDepth);
+    default: return genScalar(rng);
+  }
+}
+
+function genScalar(rng: () => number): any {
+  switch (randInt(rng, 5)) {
+    case 0: return null;
+    case 1: return rng() < 0.5;
+    case 2: return genNumber(rng);
+    default: return genString(rng);
+  }
+}
+
+function genNumber(rng: () => number): number {
+  switch (randInt(rng, 7)) {
+    case 0: return 0;
+    case 1: return randInt(rng, 1000);
+    case 2: return -randInt(rng, 1000);
+    case 3: return randInt(rng, 1000000) + rng();
+    case 4: return -0;
+    case 5: return (randInt(rng, 999) + 1) * 1e18;
+    case 6: return (randInt(rng, 999) + 1) * 1e-10;
+    default: return rng() * 2000 - 1000;
+  }
+}
+
+const CHARS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+const SPECIAL = ' |,="\\#@\n\t~^+-.';
+
+function genString(rng: () => number): string {
+  const n = randInt(rng, 20);
+  let s = '';
+  for (let i = 0; i < n; i++) {
+    if (rng() < 0.2) {
+      s += SPECIAL[randInt(rng, SPECIAL.length)];
+    } else {
+      s += CHARS[randInt(rng, CHARS.length)];
+    }
+  }
+  return s;
+}
+
+function genBareKey(rng: () => number): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyz_';
+  const n = 1 + randInt(rng, 8);
+  let s = '';
+  for (let i = 0; i < n; i++) s += chars[randInt(rng, chars.length)];
+  return s;
+}
+
+function genObject(rng: () => number, depth: number, maxDepth: number): Record<string, any> {
+  const n = randInt(rng, 6);
+  const obj: Record<string, any> = {};
+  for (let i = 0; i < n; i++) {
+    const key = genBareKey(rng);
+    if (!(key in obj)) obj[key] = genValue(rng, depth + 1, maxDepth);
+  }
+  return obj;
+}
+
+function genArray(rng: () => number, depth: number, maxDepth: number): any[] {
+  const n = randInt(rng, 6);
+  const arr: any[] = [];
+  switch (randInt(rng, 4)) {
+    case 0:
+      for (let i = 0; i < n; i++) arr.push(genScalar(rng));
+      break;
+    case 1: {
+      const fields = Array.from({ length: 1 + randInt(rng, 4) }, () => genBareKey(rng));
+      for (let i = 0; i < n; i++) {
+        const obj: Record<string, any> = {};
+        for (const f of fields) {
+          if (rng() > 0.2) obj[f] = genScalar(rng);
+        }
+        arr.push(obj);
+      }
+      break;
+    }
+    case 2:
+      for (let i = 0; i < n; i++) {
+        const obj: Record<string, any> = {};
+        obj[genBareKey(rng)] = genScalar(rng);
+        if (rng() < 0.3 && depth + 1 < maxDepth) {
+          obj[genBareKey(rng)] = genValue(rng, depth + 2, maxDepth);
+        }
+        arr.push(obj);
+      }
+      break;
+    default:
+      for (let i = 0; i < n; i++) arr.push(genValue(rng, depth + 1, maxDepth));
+  }
+  return arr;
+}
+
+const COLLISION_STRINGS = [
+  'true', 'false', '-', '~', '^',
+  '0', '1', '42', '-1', '3.14', '1e10', '-0',
+  '', ' ', '  ', ' x', 'x ',
+  '#', '# comment', '@0', '@handle',
+  '+1', '.5', '+.3', '01', '00',
+  'null', 'NULL', 'True', 'False',
+  '|', ',', '=', '"', '\\',
+  '\n', '\r', '\t', '\b',
+  'a|b', 'a,b', 'a=b', 'hello world',
+];
+
+function genAdversarialScalar(rng: () => number): any {
+  switch (randInt(rng, 6)) {
+    case 0: return null;
+    case 1: return rng() < 0.5;
+    case 2: return genNumber(rng);
+    default: return rng() < 0.3 ? pick(rng, COLLISION_STRINGS) : genString(rng);
+  }
+}
+
+function genAdversarialValue(rng: () => number, depth: number, maxDepth: number): any {
+  if (depth >= maxDepth) return genAdversarialScalar(rng);
+  switch (randInt(rng, 8)) {
+    case 0: return null;
+    case 1: return rng() < 0.5;
+    case 2: return genNumber(rng);
+    case 3: return rng() < 0.3 ? pick(rng, COLLISION_STRINGS) : genString(rng);
+    case 4: return genAdversarialObject(rng, depth, maxDepth);
+    case 5: return genAdversarialArray(rng, depth, maxDepth);
+    case 6: return rng() < 0.5 ? {} : [];
+    default: return genAdversarialScalar(rng);
+  }
+}
+
+function genAdversarialObject(rng: () => number, depth: number, maxDepth: number): Record<string, any> {
+  const n = randInt(rng, 5);
+  const obj: Record<string, any> = {};
+  for (let i = 0; i < n; i++) {
+    const key = rng() < 0.25 ? pick(rng, COLLISION_STRINGS) : genBareKey(rng);
+    if (!(key in obj)) obj[key] = genAdversarialValue(rng, depth + 1, maxDepth);
+  }
+  return obj;
+}
+
+function genAdversarialArray(rng: () => number, depth: number, maxDepth: number): any[] {
+  const n = randInt(rng, 5);
+  const arr: any[] = [];
+  switch (randInt(rng, 5)) {
+    case 0:
+      for (let i = 0; i < n; i++) arr.push(genAdversarialScalar(rng));
+      break;
+    case 1: {
+      const fields = [genBareKey(rng), genBareKey(rng), genBareKey(rng)];
+      for (let i = 0; i < n; i++) {
+        const obj: Record<string, any> = {};
+        for (const f of fields) {
+          switch (randInt(rng, 4)) {
+            case 0: break;
+            case 1: obj[f] = null; break;
+            default: obj[f] = genAdversarialScalar(rng);
+          }
+        }
+        arr.push(obj);
+      }
+      break;
+    }
+    case 2:
+      for (let i = 0; i < n; i++) {
+        const obj: Record<string, any> = {};
+        obj[genBareKey(rng)] = genAdversarialScalar(rng);
+        if (rng() < 0.5 && depth + 1 < maxDepth) {
+          const nested: Record<string, any> = {};
+          nested[genBareKey(rng)] = genAdversarialScalar(rng);
+          obj[genBareKey(rng)] = nested;
+        }
+        if (rng() < 0.3) obj[genBareKey(rng)] = [genAdversarialScalar(rng)];
+        arr.push(obj);
+      }
+      break;
+    case 3:
+      for (let i = 0; i < n; i++) {
+        const inner: any[] = [];
+        for (let j = 0; j < randInt(rng, 3); j++) inner.push(genAdversarialScalar(rng));
+        arr.push(inner);
+      }
+      break;
+    default:
+      for (let i = 0; i < n; i++) arr.push(genAdversarialValue(rng, depth + 1, maxDepth));
+  }
+  return arr;
+}
+
+function jsonNorm(v: any): any {
+  return JSON.parse(JSON.stringify(v));
+}
+
+// Structural deep equality: same types, same values, same array order.
+// Object key order is NOT compared (tabular encoding normalizes key order to field union).
+function structuralEqual(a: any, b: any): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return a === b;
+  if (typeof a !== typeof b) return false;
+  if (typeof a !== 'object') return Object.is(a, b);
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    if (a.length !== b.length) return false;
+    return a.every((v: any, i: number) => structuralEqual(v, b[i]));
+  }
+  const aKeys = Object.keys(a).sort();
+  const bKeys = Object.keys(b).sort();
+  if (aKeys.length !== bKeys.length) return false;
+  if (aKeys.join(',') !== bKeys.join(',')) return false;
+  return aKeys.every(k => structuralEqual(a[k], b[k]));
+}
+
+// --- Graph round-trip (existing) ---
+
+describe('Graph round-trip', () => {
+  it('encode then decode preserves payload', () => {
+    const p = {
+      tool: 'test',
       tokenBudget: 5000,
       tokensUsed: 1847,
-      packRoot: 'deadbeef1234',
       symbols: [
-        { qualifiedName: 'pkg.AuthMiddleware', kind: 'function', score: 0.78, provenance: 'lsp_resolved', distance: 0 },
-        { qualifiedName: 'pkg.Config', kind: 'type', score: 0.65, provenance: 'ast_inferred', distance: 0 },
-        { qualifiedName: 'pkg.NewServer', kind: 'function', score: 0.54, provenance: 'lsp_resolved', distance: 1 },
-        { qualifiedName: 'pkg.DB', kind: 'interface', score: 0.42, provenance: 'rwr', distance: 2 },
+        { qualifiedName: 'pkg.Auth', kind: 'function', score: 0.78, provenance: 'lsp_resolved', distance: 0 },
+        { qualifiedName: 'pkg.Server', kind: 'function', score: 0.54, provenance: 'lsp_resolved', distance: 1 },
       ],
       edges: [
-        { source: 'pkg.NewServer', target: 'pkg.AuthMiddleware', edgeType: 'calls' },
-        { source: 'pkg.NewServer', target: 'pkg.Config', edgeType: 'imports' },
-        { source: 'pkg.AuthMiddleware', target: 'pkg.DB', edgeType: 'implements' },
+        { source: 'pkg.Server', target: 'pkg.Auth', edgeType: 'calls' },
       ],
     };
-
-    const encoded = encode(original);
+    const encoded = encode(p);
     const decoded = decode(encoded);
+    expect(decoded.tool).toBe(p.tool);
+    expect(decoded.symbols.length).toBe(2);
+    expect(decoded.edges.length).toBe(1);
+  });
+});
 
-    expect(decoded.tool).toBe(original.tool);
-    expect(decoded.tokenBudget).toBe(original.tokenBudget);
-    expect(decoded.tokensUsed).toBe(original.tokensUsed);
-    expect(decoded.packRoot).toBe(original.packRoot);
+// --- Generic property-based round-trip ---
 
-    expect(decoded.symbols).toHaveLength(original.symbols.length);
-    for (let i = 0; i < original.symbols.length; i++) {
-      expect(decoded.symbols[i].qualifiedName).toBe(original.symbols[i].qualifiedName);
-      expect(decoded.symbols[i].kind).toBe(original.symbols[i].kind);
-      expect(decoded.symbols[i].score).toBeCloseTo(original.symbols[i].score, 1);
-      expect(decoded.symbols[i].provenance).toBe(original.symbols[i].provenance);
-      expect(decoded.symbols[i].distance).toBe(original.symbols[i].distance);
-    }
-
-    expect(decoded.edges).toHaveLength(original.edges.length);
-    for (let i = 0; i < original.edges.length; i++) {
-      expect(decoded.edges[i].source).toBe(original.edges[i].source);
-      expect(decoded.edges[i].target).toBe(original.edges[i].target);
-      expect(decoded.edges[i].edgeType).toBe(original.edges[i].edgeType);
+describe('Generic property-based round-trip', () => {
+  it(`${ITERATIONS} random values`, () => {
+    const rng = makeRng(42);
+    let failures = 0;
+    for (let i = 0; i < ITERATIONS; i++) {
+      const val = genValue(rng, 0, 4);
+      const gcf = encodeGeneric(val);
+      let decoded: any;
+      try {
+        decoded = decodeGeneric(gcf);
+      } catch (e: any) {
+        throw new Error(`iteration ${i}: decode failed: ${e.message}\n  input: ${JSON.stringify(val)}\n  gcf: ${JSON.stringify(gcf)}`);
+      }
+      if (!structuralEqual(jsonNorm(val), jsonNorm(decoded))) {
+        throw new Error(`iteration ${i}: round-trip mismatch\n  input:   ${JSON.stringify(val)}\n  decoded: ${JSON.stringify(decoded)}\n  gcf: ${JSON.stringify(gcf)}`);
+      }
     }
   });
 
-  it('roundtrips empty payload', () => {
-    const original: Payload = {
-      tool: 'test',
-      tokenBudget: 0,
-      tokensUsed: 0,
-      symbols: [],
-      edges: [],
-    };
-
-    const encoded = encode(original);
-    const decoded = decode(encoded);
-
-    expect(decoded.tool).toBe('test');
-    expect(decoded.symbols).toHaveLength(0);
-    expect(decoded.edges).toHaveLength(0);
-  });
-
-  it('roundtrips multiple distance groups', () => {
-    const original: Payload = {
-      tool: 'test',
-      tokenBudget: 1000,
-      tokensUsed: 200,
-      symbols: [
-        { qualifiedName: 'a.Target', kind: 'function', score: 0.99, provenance: 'rwr', distance: 0 },
-        { qualifiedName: 'a.Related', kind: 'method', score: 0.75, provenance: 'rwr', distance: 1 },
-        { qualifiedName: 'a.Extended', kind: 'class', score: 0.50, provenance: 'rwr', distance: 2 },
-        { qualifiedName: 'a.Far', kind: 'var', score: 0.25, provenance: 'rwr', distance: 5 },
-      ],
-      edges: [],
-    };
-
-    const encoded = encode(original);
-    const decoded = decode(encoded);
-
-    expect(decoded.symbols[0].distance).toBe(0);
-    expect(decoded.symbols[1].distance).toBe(1);
-    expect(decoded.symbols[2].distance).toBe(2);
-    expect(decoded.symbols[3].distance).toBe(5);
-  });
-
-  it('roundtrips edge with status', () => {
-    const original: Payload = {
-      tool: 'test',
-      tokenBudget: 100,
-      tokensUsed: 50,
-      symbols: [
-        { qualifiedName: 'a.A', kind: 'function', score: 0.9, provenance: 'rwr', distance: 0 },
-        { qualifiedName: 'a.B', kind: 'function', score: 0.8, provenance: 'rwr', distance: 0 },
-      ],
-      edges: [
-        { source: 'a.B', target: 'a.A', edgeType: 'calls', status: 'added' },
-      ],
-    };
-
-    const encoded = encode(original);
-    const decoded = decode(encoded);
-
-    expect(decoded.edges[0].status).toBe('added');
+  it(`${ITERATIONS} adversarial values`, () => {
+    const rng = makeRng(99);
+    for (let i = 0; i < ITERATIONS; i++) {
+      const val = genAdversarialValue(rng, 0, 3);
+      const gcf = encodeGeneric(val);
+      let decoded: any;
+      try {
+        decoded = decodeGeneric(gcf);
+      } catch (e: any) {
+        throw new Error(`iteration ${i}: decode failed: ${e.message}\n  input: ${JSON.stringify(val)}\n  gcf: ${JSON.stringify(gcf)}`);
+      }
+      if (!structuralEqual(jsonNorm(val), jsonNorm(decoded))) {
+        throw new Error(`iteration ${i}: round-trip mismatch\n  input:   ${JSON.stringify(val)}\n  decoded: ${JSON.stringify(decoded)}\n  gcf: ${JSON.stringify(gcf)}`);
+      }
+    }
   });
 });

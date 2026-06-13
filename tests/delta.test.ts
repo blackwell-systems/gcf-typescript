@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { encodeDelta } from '../src/delta.js';
-import type { DeltaPayload } from '../src/types.js';
+import { encodeDelta, verifyDelta } from '../src/delta.js';
+import { packRoot } from '../src/packroot.js';
+import type { DeltaPayload, Symbol as GcfSymbol, Edge } from '../src/types.js';
 
 describe('encodeDelta', () => {
   it('encodes a delta payload with all sections', () => {
@@ -115,5 +116,103 @@ describe('encodeDelta', () => {
     const output = encodeDelta(d);
     expect(output).toContain('iface pkg.Thing');
     expect(output).toContain('svc pkg.Svc');
+  });
+});
+
+describe('packRoot', () => {
+  const symbols: GcfSymbol[] = [
+    { qualifiedName: 'pkg.Handler', kind: 'function', score: 0.85, provenance: 'lsp_resolved', distance: 0 },
+    { qualifiedName: 'pkg.Middleware', kind: 'function', score: 0.7, provenance: 'ast_inferred', distance: 1 },
+  ];
+  const edges: Edge[] = [
+    { source: 'pkg.Handler', target: 'pkg.Middleware', edgeType: 'calls' },
+  ];
+
+  it('produces consistent hash for same input', () => {
+    const h1 = packRoot(symbols, edges);
+    const h2 = packRoot(symbols, edges);
+    expect(h1).toBe(h2);
+    expect(h1).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
+  it('produces different hash for different input', () => {
+    const h1 = packRoot(symbols, edges);
+
+    const differentSymbols: GcfSymbol[] = [
+      { qualifiedName: 'pkg.Other', kind: 'type', score: 0.5, provenance: 'lsp_resolved', distance: 0 },
+    ];
+    const h2 = packRoot(differentSymbols, []);
+    expect(h1).not.toBe(h2);
+  });
+
+  it('is order-independent (sorted canonically)', () => {
+    const reversed = [...symbols].reverse();
+    const h1 = packRoot(symbols, edges);
+    const h2 = packRoot(reversed, edges);
+    expect(h1).toBe(h2);
+  });
+});
+
+describe('verifyDelta', () => {
+  const baseSymbols: GcfSymbol[] = [
+    { qualifiedName: 'pkg.Handler', kind: 'function', score: 0.85, provenance: 'lsp_resolved', distance: 0 },
+    { qualifiedName: 'pkg.OldHelper', kind: 'function', score: 0.6, provenance: 'ast_inferred', distance: 1 },
+  ];
+  const baseEdges: Edge[] = [
+    { source: 'pkg.Handler', target: 'pkg.OldHelper', edgeType: 'calls' },
+  ];
+
+  const removedSymbols: GcfSymbol[] = [
+    { qualifiedName: 'pkg.OldHelper', kind: 'function', score: 0.6, provenance: 'ast_inferred', distance: 1 },
+  ];
+  const addedSymbols: GcfSymbol[] = [
+    { qualifiedName: 'pkg.NewHelper', kind: 'function', score: 0.75, provenance: 'lsp_resolved', distance: 1 },
+  ];
+  const removedEdges: Edge[] = [
+    { source: 'pkg.Handler', target: 'pkg.OldHelper', edgeType: 'calls' },
+  ];
+  const addedEdges: Edge[] = [
+    { source: 'pkg.Handler', target: 'pkg.NewHelper', edgeType: 'calls' },
+  ];
+
+  it('succeeds on valid delta', () => {
+    // Compute the expected new root from the expected final state.
+    const expectedSymbols: GcfSymbol[] = [
+      { qualifiedName: 'pkg.Handler', kind: 'function', score: 0.85, provenance: 'lsp_resolved', distance: 0 },
+      { qualifiedName: 'pkg.NewHelper', kind: 'function', score: 0.75, provenance: 'lsp_resolved', distance: 1 },
+    ];
+    const expectedEdges: Edge[] = [
+      { source: 'pkg.Handler', target: 'pkg.NewHelper', edgeType: 'calls' },
+    ];
+    const expectedNewRoot = packRoot(expectedSymbols, expectedEdges);
+
+    const result = verifyDelta(
+      baseSymbols,
+      baseEdges,
+      removedSymbols,
+      addedSymbols,
+      removedEdges,
+      addedEdges,
+      expectedNewRoot,
+    );
+
+    expect(result.symbols).toHaveLength(2);
+    expect(result.edges).toHaveLength(1);
+    expect(result.symbols.find((s) => s.qualifiedName === 'pkg.NewHelper')).toBeDefined();
+    expect(result.symbols.find((s) => s.qualifiedName === 'pkg.OldHelper')).toBeUndefined();
+  });
+
+  it('fails on root mismatch', () => {
+    expect(() =>
+      verifyDelta(
+        baseSymbols,
+        baseEdges,
+        removedSymbols,
+        addedSymbols,
+        removedEdges,
+        addedEdges,
+        'sha256:0000000000000000000000000000000000000000000000000000000000000000',
+      ),
+    ).toThrow('pack root mismatch');
   });
 });

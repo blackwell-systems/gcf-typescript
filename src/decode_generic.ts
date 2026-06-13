@@ -5,7 +5,7 @@ import {
 } from './scalar.js';
 
 /**
- * Decode GCF v2.0 generic or graph profile text into a JS value.
+ * Decode GCF generic or graph profile text into a JS value.
  */
 export function decodeGeneric(input: string): any {
   input = input.trimEnd();
@@ -255,6 +255,10 @@ function parseTabularBody(lines: string[], start: number, depth: number, fields:
   const rows: any[] = [];
   let i = start;
 
+  // Track inline schemas and shared array schemas.
+  const inlineSchemas = new Map<string, string[]>();
+  const sharedArraySchemas = new Map<string, string[]>();
+
   while (i < lines.length) {
     const line = lines[i];
     const content = depth > 0 ? (line.startsWith(ind) ? line.slice(ind.length) : null) : line;
@@ -263,50 +267,163 @@ function parseTabularBody(lines: string[], start: number, depth: number, fields:
 
     if (content.length > 0 && content[0] === ' ') {
       const trimmed = content.trimStart();
-      if (trimmed.startsWith('.')) throw new Error(`orphan_attachment: ${trimmed}`);
+      if (trimmed.startsWith('.')) break; // attachment lines handled below
       break;
     }
 
+    // Strip @N prefix (must be @digits).
     let rowData = content;
     let rowHasID = false;
     if (rowData.startsWith('@')) {
       const sp = rowData.indexOf(' ');
-      if (sp > 0) { rowData = rowData.slice(sp + 1); rowHasID = true; }
+      if (sp > 0) {
+        const idStr = rowData.slice(1, sp);
+        if (/^\d+$/.test(idStr)) {
+          rowData = rowData.slice(sp + 1);
+          rowHasID = true;
+        }
+      }
     }
 
     const vals = splitRespectingQuotes(rowData, '|');
     if (vals.length !== fields.length) throw new Error(`row_width_mismatch: expected ${fields.length}, got ${vals.length}`);
 
-    const row: Record<string, any> = {};
-    const attachmentFields: string[] = [];
+    // Parse cells: scalars, traditional attachments, and inline schema attachments.
+    const cellValues = new Map<string, any>();
+    const traditionalAttFields: string[] = [];
+    const inlineAttFields: string[] = [];
+    const inlineAttOrder: string[] = [];
+    const missingFields = new Set<string>();
+
     for (let j = 0; j < fields.length; j++) {
-      const parsed = parseScalar(vals[j], true);
-      if (parsed === MISSING) continue;
-      if (parsed === ATTACHMENT) { attachmentFields.push(fields[j]); continue; }
-      row[fields[j]] = parsed;
+      const cellVal = vals[j];
+
+      // Check for ^{fields} inline schema declaration.
+      if (cellVal.startsWith('^{') && cellVal.endsWith('}')) {
+        const schemaStr = cellVal.slice(1);
+        const ifs = splitFieldDecl(schemaStr);
+        inlineSchemas.set(fields[j], ifs);
+        inlineAttFields.push(fields[j]);
+        inlineAttOrder.push(fields[j]);
+        continue;
+      }
+
+      const parsed = parseScalar(cellVal, true);
+      if (parsed === MISSING) { missingFields.add(fields[j]); continue; }
+      if (parsed === ATTACHMENT) {
+        // Check if this field has a stored inline schema.
+        if (inlineSchemas.has(fields[j])) {
+          inlineAttFields.push(fields[j]);
+          inlineAttOrder.push(fields[j]);
+        } else {
+          traditionalAttFields.push(fields[j]);
+        }
+        continue;
+      }
+      // Handle inline schema objects returned by parseScalar (for ^{...} that got through).
+      if (parsed && typeof parsed === 'object' && parsed.__inlineSchema) {
+        const ifs = splitFieldDecl(parsed.__inlineSchema);
+        inlineSchemas.set(fields[j], ifs);
+        inlineAttFields.push(fields[j]);
+        inlineAttOrder.push(fields[j]);
+        continue;
+      }
+      cellValues.set(fields[j], parsed);
     }
     i++;
 
-    if (rowHasID && attachmentFields.length > 0) {
-      const attIndent = ind + '  ';
-      const resolved = new Set<string>();
-      while (i < lines.length) {
-        const al = lines[i];
-        if (!al.startsWith(attIndent)) break;
-        const ac = al.slice(attIndent.length);
-        if (!ac.startsWith('.')) break;
-        const [name, val, consumed] = parseAttachment(lines, i, ac.slice(1), depth + 2);
-        if (resolved.has(name)) throw new Error(`duplicate_attachment: ${name}`);
-        resolved.add(name);
-        row[name] = val;
-        i += consumed;
+    // Parse attachments in line order.
+    const allAttFields = [...traditionalAttFields, ...inlineAttFields];
+    const attachmentValues = new Map<string, any>();
+
+    if (rowHasID && allAttFields.length > 0) {
+      let inlineIdx = 0;
+
+      while (i < lines.length && attachmentValues.size < allAttFields.length) {
+        const aLine = lines[i];
+        let aContent: string | null = null;
+        if (aLine.startsWith(ind + '  ')) {
+          aContent = aLine.slice(ind.length + 2);
+        } else if (depth === 0 || aLine.startsWith(ind)) {
+          aContent = depth > 0 ? aLine.slice(ind.length) : aLine;
+        } else {
+          break;
+        }
+        if (aContent === null) break;
+
+        // Line starts with ".": traditional or prefixed inline attachment.
+        if (aContent.startsWith('.')) {
+          const rest = aContent.slice(1);
+          const [attName, afterName] = parseAttachmentName(rest);
+
+          // Check if this is an inline schema field with pipe-delimited data.
+          const ifs = inlineSchemas.get(attName);
+          if (ifs && !afterName.trimStart().startsWith('{}') && !afterName.trimStart().startsWith('[')) {
+            const data = afterName.trimStart();
+            const inlineVals = splitRespectingQuotes(data, '|');
+            if (inlineVals.length !== ifs.length) throw new Error(`inline_width_mismatch: ${attName} expected ${ifs.length}, got ${inlineVals.length}`);
+            const obj: Record<string, any> = {};
+            for (let k = 0; k < ifs.length; k++) {
+              const p = parseScalar(inlineVals[k], true);
+              if (p !== MISSING) obj[ifs[k]] = p;
+            }
+            attachmentValues.set(attName, obj);
+            i++;
+            continue;
+          }
+
+          // Traditional attachment.
+          const [name, val, consumed, parsedFields] = parseAttachment(lines, i, rest, depth + 2, sharedArraySchemas);
+          // Store shared array schema from first row.
+          if (rows.length === 0 && parsedFields) {
+            sharedArraySchemas.set(name, parsedFields);
+          }
+          attachmentValues.set(name, val);
+          i += consumed;
+          continue;
+        }
+
+        // No-prefix line: positional inline data.
+        let foundInline = false;
+        let nextInlineField = '';
+        while (inlineIdx < inlineAttOrder.length) {
+          const candidate = inlineAttOrder[inlineIdx];
+          if (!attachmentValues.has(candidate)) {
+            nextInlineField = candidate;
+            foundInline = true;
+            break;
+          }
+          inlineIdx++;
+        }
+        if (!foundInline) break;
+
+        const ifs = inlineSchemas.get(nextInlineField)!;
+        const inlineVals = splitRespectingQuotes(aContent, '|');
+        if (inlineVals.length !== ifs.length) throw new Error(`inline_width_mismatch: ${nextInlineField} expected ${ifs.length}, got ${inlineVals.length}`);
+        const obj: Record<string, any> = {};
+        for (let k = 0; k < ifs.length; k++) {
+          const p = parseScalar(inlineVals[k], true);
+          if (p !== MISSING) obj[ifs[k]] = p;
+        }
+        attachmentValues.set(nextInlineField, obj);
+        inlineIdx++;
+        i++;
       }
-      for (const f of attachmentFields) {
-        if (!resolved.has(f)) throw new Error(`missing_attachment: ${f}`);
+
+      for (const f of allAttFields) {
+        if (!attachmentValues.has(f)) throw new Error(`missing_attachment: ${f}`);
       }
     }
 
-    if (!rowHasID || attachmentFields.length === 0) {
+    // Build row in field declaration order.
+    const row: Record<string, any> = {};
+    for (const f of fields) {
+      if (missingFields.has(f)) continue;
+      if (cellValues.has(f)) { row[f] = cellValues.get(f); continue; }
+      if (attachmentValues.has(f)) { row[f] = attachmentValues.get(f); continue; }
+    }
+
+    if (!rowHasID || allAttFields.length === 0) {
       const attIndent = ind + '  ';
       if (i < lines.length && lines[i].startsWith(attIndent)) {
         const peek = lines[i].slice(attIndent.length);
@@ -320,34 +437,86 @@ function parseTabularBody(lines: string[], start: number, depth: number, fields:
   return [rows, i - start];
 }
 
-function parseAttachment(lines: string[], lineIdx: number, rest: string, depth: number): [string, any, number] {
-  let name: string;
-  let afterName: string;
+function parseAttachmentName(rest: string): [string, string] {
   if (rest[0] === '"') {
-    let closeIdx = -1;
     for (let j = 1; j < rest.length; j++) {
       if (rest[j] === '\\') { j++; continue; }
-      if (rest[j] === '"') { closeIdx = j; break; }
+      if (rest[j] === '"') {
+        const name = parseQuotedString(rest.slice(0, j + 1));
+        return [name, rest.slice(j + 1)];
+      }
     }
-    if (closeIdx < 0) throw new Error('unterminated_quote');
-    name = parseQuotedString(rest.slice(0, closeIdx + 1));
-    afterName = rest.slice(closeIdx + 1).trimStart();
-  } else {
-    const sp = rest.indexOf(' ');
-    if (sp < 0) throw new Error(`invalid attachment: ${rest}`);
-    name = rest.slice(0, sp);
-    afterName = rest.slice(sp).trimStart();
+    return ['', rest];
   }
+  const sp = rest.indexOf(' ');
+  if (sp >= 0) return [rest.slice(0, sp), rest.slice(sp)];
+  return [rest, ''];
+}
+
+/** Attachment parser: returns [name, value, consumed, parsedFields]. parsedFields is set for tabular arrays with explicit {fields}. */
+function parseAttachment(lines: string[], lineIdx: number, rest: string, depth: number, sharedSchemas: Map<string, string[]>): [string, any, number, string[] | null] {
+  const [name, afterNameRaw] = parseAttachmentName(rest);
+  const afterName = afterNameRaw.trimStart();
 
   if (afterName.startsWith('{}')) {
     const nested: Record<string, any> = {};
     const consumed = parseObjectBody(lines, lineIdx + 1, depth, nested);
-    return [name, nested, consumed + 1];
+    return [name, nested, consumed + 1, null];
   }
+
   if (afterName.startsWith('[')) {
+    const closeBracket = afterName.indexOf(']');
+    if (closeBracket < 0) throw new Error('invalid_count: missing ]');
+    const afterClose = afterName.slice(closeBracket + 1);
+
+    // [N]{fields}: has its own schema.
+    if (afterClose.startsWith('{')) {
+      const endBrace = findClosingBrace(afterClose);
+      let parsedFields: string[] | null = null;
+      if (endBrace >= 0) {
+        try { parsedFields = splitFieldDecl(afterClose.slice(0, endBrace + 1)); } catch {}
+      }
+      const [arr, consumed] = parseArrayFromHeader(lines, lineIdx, depth, afterName);
+      return [name, arr, consumed, parsedFields];
+    }
+
+    // [N]: values or [N] (check for inline primitive array first).
+    const afterCloseForInline = afterName.slice(closeBracket + 1);
+    if (afterCloseForInline.startsWith(': ') || afterCloseForInline === ':') {
+      // Inline primitive array: don't use shared schema.
+      const [arr, consumed] = parseArrayFromHeader(lines, lineIdx, depth, afterName);
+      return [name, arr, consumed, null];
+    }
+
+    // [N] without {fields}: check for shared schema.
+    if (sharedSchemas.has(name)) {
+      const sf = sharedSchemas.get(name)!;
+      const countStr = afterName.slice(1, closeBracket);
+      let count = -1;
+      if (countStr !== '?') count = parseInt(countStr, 10);
+      if (count === 0) return [name, [], 1, null];
+
+      // Peek: if next line starts with @, it's expanded, not tabular.
+      const nextIdx = lineIdx + 1;
+      const ind = '  '.repeat(depth);
+      let useShared = true;
+      if (nextIdx < lines.length) {
+        let nextContent = lines[nextIdx];
+        if (depth > 0 && nextContent.startsWith(ind)) nextContent = nextContent.slice(ind.length);
+        if (nextContent.trimStart().startsWith('@')) useShared = false;
+      }
+      if (useShared) {
+        const [rows, consumed] = parseTabularBody(lines, lineIdx + 1, depth, sf, count);
+        if (count >= 0 && rows.length !== count) throw new Error(`count_mismatch: declared ${count}, got ${rows.length}`);
+        return [name, rows, consumed + 1, null];
+      }
+    }
+
+    // No shared schema: standard parsing.
     const [arr, consumed] = parseArrayFromHeader(lines, lineIdx, depth, afterName);
-    return [name, arr, consumed];
+    return [name, arr, consumed, null];
   }
+
   throw new Error(`invalid attachment form: ${afterName}`);
 }
 

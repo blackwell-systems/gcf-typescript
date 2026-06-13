@@ -1,5 +1,6 @@
-import type { DeltaPayload } from './types.js';
+import type { DeltaPayload, Symbol, Edge } from './types.js';
 import { KIND_ABBREV } from './constants.js';
+import { packRoot } from './packroot.js';
 
 /**
  * EncodeDelta serializes a DeltaPayload into GCF delta format.
@@ -52,4 +53,42 @@ export function encodeDelta(d: DeltaPayload): string {
   }
 
   return lines.join('\n') + '\n';
+}
+
+/**
+ * Apply a delta to a base set of symbols/edges and verify the resulting pack root.
+ *
+ * Returns the new symbol and edge sets if the computed root matches expectedNewRoot.
+ * Throws if the root does not match.
+ */
+export function verifyDelta(
+  baseSymbols: Symbol[],
+  baseEdges: Edge[],
+  removedSymbols: Symbol[],
+  addedSymbols: Symbol[],
+  removedEdges: Edge[],
+  addedEdges: Edge[],
+  expectedNewRoot: string,
+): { symbols: Symbol[]; edges: Edge[] } {
+  // Remove symbols by qualifiedName.
+  const removedNames = new Set(removedSymbols.map((s) => s.qualifiedName));
+  const newSymbols = baseSymbols.filter((s) => !removedNames.has(s.qualifiedName)).concat(addedSymbols);
+
+  // Remove edges by (source, target, edgeType).
+  const removedEdgeKeys = new Set(
+    removedEdges.map((e) => `${e.source}\t${e.target}\t${e.edgeType}`),
+  );
+  const newEdges = baseEdges
+    .filter((e) => !removedEdgeKeys.has(`${e.source}\t${e.target}\t${e.edgeType}`))
+    .concat(addedEdges);
+
+  // Compute pack root and verify.
+  const computed = packRoot(newSymbols, newEdges);
+  if (computed !== expectedNewRoot) {
+    throw new Error(
+      `pack root mismatch: expected ${expectedNewRoot}, computed ${computed}`,
+    );
+  }
+
+  return { symbols: newSymbols, edges: newEdges };
 }

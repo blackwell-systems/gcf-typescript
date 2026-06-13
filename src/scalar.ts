@@ -1,5 +1,5 @@
 /**
- * Common scalar grammar for GCF v2.0.
+ * Common scalar grammar for GCF.
  * Shared between encoder, decoder, and streaming encoder.
  */
 
@@ -13,11 +13,17 @@ export function needsQuote(s: string): boolean {
   if (JSON_NUMBER_RE.test(s)) return true;
   if (NUMERIC_LIKE_RE.test(s)) return true;
   if (s[0] === ' ' || s[s.length - 1] === ' ') return true;
-  if (s[0] === '#' || s[0] === '@') return true;
+  if (s[0] === '#' || s[0] === '@' || s[0] === '.') return true;
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i);
     if (c === 0x22 || c === 0x5c || c < 0x20 || c === 0x0a || c === 0x0d ||
         c === 0x7c || c === 0x2c) return true; // " \ control \n \r | ,
+    // C1 control characters
+    if (c >= 0x80 && c <= 0x9f) return true;
+    // Unicode whitespace beyond ASCII
+    if (c > 0x7f && (c === 0xa0 || c === 0x2028 || c === 0x2029 || c === 0xfeff ||
+        c === 0x1680 || (c >= 0x2000 && c <= 0x200a) || c === 0x202f ||
+        c === 0x205f || c === 0x3000)) return true;
   }
   return false;
 }
@@ -108,10 +114,12 @@ export function parseScalar(s: string, tabularContext: boolean): any {
     return MISSING;
   }
 
-  // 4. Attachment (tabular only).
-  if (s === '^') {
+  // 4. Attachment (tabular only). Plain ^ or ^{fields} (inline schema).
+  if (s === '^' || (s.startsWith('^{') && s.endsWith('}'))) {
     if (!tabularContext) throw new Error('invalid_attachment_marker: ^ outside tabular row cell');
-    return ATTACHMENT;
+    if (s === '^') return ATTACHMENT;
+    // Inline schema: return the schema string for the caller to parse.
+    return { __inlineSchema: s.slice(1) }; // e.g. "{name,email,tier}"
   }
 
   // 5. Boolean.
