@@ -70,6 +70,14 @@ describe('Conformance v2', () => {
           expect(jsonSubset(data.expected, got)).toBe(true);
           break;
         }
+        case 'roundtrip': {
+          // Encode the input, verify it matches expected, then decode and verify round-trip.
+          const encoded = encodeGeneric(data.input);
+          expect(encoded).toBe(data.expected);
+          const decoded = decodeGeneric(encoded);
+          expect(jsonNorm(decoded)).toEqual(jsonNorm(data.input));
+          break;
+        }
         case 'error': {
           const inputStr = data.inputBase64
             ? Buffer.from(data.inputBase64, 'base64').toString('binary')

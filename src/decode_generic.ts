@@ -267,7 +267,7 @@ function parseTabularBody(lines: string[], start: number, depth: number, fields:
 
     if (content.length > 0 && content[0] === ' ') {
       const trimmed = content.trimStart();
-      if (trimmed.startsWith('.')) break; // attachment lines handled below
+      if (trimmed.startsWith('.')) break; // attachment lines handled below (v2 indented or v3)
       break;
     }
 
@@ -350,8 +350,13 @@ function parseTabularBody(lines: string[], start: number, depth: number, fields:
         if (aContent === null) break;
 
         // Line starts with ".": traditional or prefixed inline attachment.
-        if (aContent.startsWith('.')) {
-          const rest = aContent.slice(1);
+        // Also handle v2-format indented attachments ("  .field ...").
+        let attContent = aContent;
+        if (!attContent.startsWith('.') && attContent.startsWith('  .')) {
+          attContent = attContent.slice(2); // strip v2 indent
+        }
+        if (attContent.startsWith('.')) {
+          const rest = attContent.slice(1);
           const [attName, afterName] = parseAttachmentName(rest);
 
           // Check if this is an inline schema field with pipe-delimited data.
@@ -365,6 +370,7 @@ function parseTabularBody(lines: string[], start: number, depth: number, fields:
               const p = parseScalar(inlineVals[k], true);
               if (p !== MISSING) obj[ifs[k]] = p;
             }
+            if (attachmentValues.has(attName)) throw new Error(`duplicate_attachment: ${attName}`);
             attachmentValues.set(attName, obj);
             i++;
             continue;
@@ -372,6 +378,7 @@ function parseTabularBody(lines: string[], start: number, depth: number, fields:
 
           // Traditional attachment.
           const [name, val, consumed, parsedFields] = parseAttachment(lines, i, rest, depth + 2, sharedArraySchemas);
+          if (attachmentValues.has(name)) throw new Error(`duplicate_attachment: ${name}`);
           // Store shared array schema from first row.
           if (rows.length === 0 && parsedFields) {
             sharedArraySchemas.set(name, parsedFields);
@@ -410,6 +417,29 @@ function parseTabularBody(lines: string[], start: number, depth: number, fields:
 
       for (const f of allAttFields) {
         if (!attachmentValues.has(f)) throw new Error(`missing_attachment: ${f}`);
+      }
+
+      // Check for duplicate attachments: if the next line is also an attachment
+      // line at this depth, it means there's a second attachment for a field
+      // that was already resolved.
+      if (i < lines.length) {
+        let peekContent: string | null = null;
+        if (depth === 0 || lines[i].startsWith(ind)) {
+          peekContent = depth > 0 ? lines[i].slice(ind.length) : lines[i];
+        }
+        if (peekContent !== null) {
+          let peekAtt = peekContent;
+          if (!peekAtt.startsWith('.') && peekAtt.startsWith('  .')) {
+            peekAtt = peekAtt.slice(2);
+          }
+          if (peekAtt.startsWith('.')) {
+            const peekRest = peekAtt.slice(1);
+            const [peekName] = parseAttachmentName(peekRest);
+            if (attachmentValues.has(peekName)) {
+              throw new Error(`duplicate_attachment: ${peekName}`);
+            }
+          }
+        }
       }
     }
 

@@ -26,9 +26,7 @@ export function decode(input: string): Payload {
   // Parse header fields.
   parseHeader(header.slice(4), p);
 
-  if (!p.tool) {
-    throw new Error("missing_tool: header missing required 'tool' field");
-  }
+  // v3.1: tool field is optional (SHOULD be present for MCP tool responses, not required).
 
   // Detect delta mode.
   const isDelta = header.includes(' delta=true');
