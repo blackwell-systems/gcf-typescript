@@ -1,6 +1,6 @@
 {
   "name": "@blackwell-systems/gcf",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Drop-in JSON replacement for AI pipelines. 79% fewer tokens. 90.7% comprehension across 10 models. Zero dependencies.",
   "type": "module",
   "main": "./dist/index.js",
@@ -9,7 +9,8 @@
     ".": {
       "types": "./dist/index.d.ts",
       "browser": "./dist/browser.js",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "require": "./dist/cjs/index.cjs"
     },
     "./browser": {
       "types": "./dist/browser.d.ts",
@@ -27,10 +28,10 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npx esbuild src/index.ts --bundle --platform=node --format=cjs --outfile=dist/cjs/index.cjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "tsc"
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "gcf",
