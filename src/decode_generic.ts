@@ -139,7 +139,19 @@ function parseObjectBody(lines: string[], start: number, depth: number, out: Rec
       continue;
     }
 
-    // Inline array.
+    // Key=value. Check this BEFORE inline array detection so that bracket
+    // patterns inside quoted values (e.g. text="ERR[404]: Not Found") are
+    // not misinterpreted as inline array headers.
+    const eqIdx = findKeyValueSplit(content);
+    if (eqIdx > 0) {
+      const name = parseKeyFromHeader(content.slice(0, eqIdx));
+      checkDup(out, name);
+      out[name] = parseScalar(content.slice(eqIdx + 1), false);
+      i++;
+      continue;
+    }
+
+    // Inline array (e.g. items[3]: a,b,c). Only reached if no = found.
     if (!content.startsWith('@') && !content.startsWith('##')) {
       const bracketIdx = content.indexOf('[');
       if (bracketIdx > 0) {
@@ -159,16 +171,6 @@ function parseObjectBody(lines: string[], start: number, depth: number, out: Rec
       }
     }
 
-    // Key=value.
-    const eqIdx = findKeyValueSplit(content);
-    if (eqIdx > 0) {
-      const name = parseKeyFromHeader(content.slice(0, eqIdx));
-      checkDup(out, name);
-      out[name] = parseScalar(content.slice(eqIdx + 1), false);
-      i++;
-      continue;
-    }
-
     i++;
   }
   return i - start;
@@ -176,6 +178,7 @@ function parseObjectBody(lines: string[], start: number, depth: number, out: Rec
 
 function findKeyValueSplit(s: string): number {
   if (!s.length) return -1;
+  // Quoted key: "key"=value
   if (s[0] === '"') {
     for (let i = 1; i < s.length; i++) {
       if (s[i] === '\\') { i++; continue; }
@@ -183,7 +186,12 @@ function findKeyValueSplit(s: string): number {
     }
     return -1;
   }
-  return s.indexOf('=');
+  // Bare key: find = but only before [ (to avoid matching = inside inline array values)
+  const eqIdx = s.indexOf('=');
+  if (eqIdx < 0) return -1;
+  const bracketIdx = s.indexOf('[');
+  if (bracketIdx >= 0 && bracketIdx < eqIdx) return -1;
+  return eqIdx;
 }
 
 function parseKeyFromHeader(s: string): string {

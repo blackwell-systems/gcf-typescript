@@ -5,6 +5,7 @@
 
 const JSON_NUMBER_RE = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
 const NUMERIC_LIKE_RE = /^[+-]\.?\d|^\.\d|^0\d/;
+const INLINE_ARRAY_RE = /\[[^\]]*\]\s*:/;
 
 /** Check if a string value must be quoted per Section 2.4. */
 export function needsQuote(s: string): boolean {
@@ -14,6 +15,7 @@ export function needsQuote(s: string): boolean {
   if (NUMERIC_LIKE_RE.test(s)) return true;
   if (s[0] === ' ' || s[s.length - 1] === ' ') return true;
   if (s[0] === '#' || s[0] === '@' || s[0] === '.') return true;
+  if (INLINE_ARRAY_RE.test(s)) return true;
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i);
     if (c === 0x22 || c === 0x5c || c < 0x20 || c === 0x0a || c === 0x0d ||
