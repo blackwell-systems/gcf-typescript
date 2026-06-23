@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { encodeGeneric } from '../src/generic.js';
+import { decodeGeneric } from '../src/decode_generic.js';
 
 describe('encodeGeneric', () => {
   it('encodes a flat tabular array of employees', () => {
@@ -122,5 +123,65 @@ describe('encodeGeneric', () => {
     const output = encodeGeneric(data);
     expect(output).toContain('"a|b"');
     expect(output).toContain('clean');
+  });
+
+  it('noFlatten option produces attachment syntax', () => {
+    const data = {
+      orders: [
+        { id: 'ORD-1', customer: { name: 'Alice', email: 'alice@co.com' }, total: 99.99 },
+        { id: 'ORD-2', customer: { name: 'Bob', email: 'bob@co.com' }, total: 49.99 },
+      ],
+    };
+
+    const withFlatten = encodeGeneric(data);
+    expect(withFlatten).toContain('customer>');
+
+    const noFlatten = encodeGeneric(data, { noFlatten: true });
+    expect(noFlatten).not.toContain('customer>');
+    expect(noFlatten).toContain('.customer');
+
+    // Both round-trip.
+    expect(decodeGeneric(withFlatten)).toEqual(data);
+    expect(decodeGeneric(noFlatten)).toEqual(data);
+  });
+
+  describe('> in field names', () => {
+    function roundTrip(name: string, data: any) {
+      it(`${name} (both flatten modes)`, () => {
+        for (const noFlatten of [false, true]) {
+          const encoded = encodeGeneric(data, { noFlatten });
+          const decoded = decodeGeneric(encoded);
+          expect(decoded).toEqual(data);
+        }
+      });
+    }
+
+    roundTrip('literal > key', [{ '>': 1 }, { '>': 2 }]);
+    roundTrip('> at start', [{ '>foo': 'a', id: 1 }, { '>foo': 'b', id: 2 }]);
+    roundTrip('> at end', [{ 'foo>': 'a', id: 1 }, { 'foo>': 'b', id: 2 }]);
+    roundTrip('double >>', [{ 'a>>b': 'x' }, { 'a>>b': 'y' }]);
+    roundTrip('multiple > in key', [{ 'a>b>c': 'x' }, { 'a>b>c': 'y' }]);
+    roundTrip('> field with null', [{ 'a>b': null, id: 1 }, { 'a>b': 'hello', id: 2 }]);
+    roundTrip('> field with object', [
+      { 'a>b': { x: 1 }, id: 1 },
+      { 'a>b': { x: 2 }, id: 2 },
+    ]);
+    roundTrip('> field with array', [
+      { 'a>b': [1, 2], id: 1 },
+      { 'a>b': [3], id: 2 },
+    ]);
+    roundTrip('all fields have >', [{ '>': 1, 'a>b': 2 }, { '>': 3, 'a>b': 4 }]);
+    roundTrip('mix of > literal and flattened', [
+      { id: 1, 'x>y': 'lit', nested: { a: 'v1', b: 'v2' } },
+      { id: 2, 'x>y': 'lit2', nested: { a: 'v3', b: 'v4' } },
+    ]);
+    roundTrip('> field absent in some rows', [
+      { id: 1, 'a>b': 'present' },
+      { id: 2 },
+    ]);
+    roundTrip('key looks like flattened path', [
+      { id: 1, 'customer>name': 'Alice' },
+      { id: 2, 'customer>name': 'Bob' },
+    ]);
   });
 });

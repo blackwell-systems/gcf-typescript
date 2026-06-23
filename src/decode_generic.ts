@@ -316,7 +316,12 @@ function parseTabularBody(lines: string[], start: number, depth: number, fields:
   const pathColumnMap = new Map<string, string[]>();
   for (const f of fields) {
     if (f.includes('>')) {
-      pathColumnMap.set(f, f.split('>'));
+      const parts = f.split('>');
+      // Only treat as a path column if all segments are non-empty.
+      // A literal key like ">" would split into ["", ""].
+      if (parts.every(p => p.length > 0)) {
+        pathColumnMap.set(f, parts);
+      }
     }
   }
 
@@ -416,10 +421,10 @@ function parseTabularBody(lines: string[], start: number, depth: number, fields:
     const allAttFields = [...traditionalAttFields, ...inlineAttFields];
     const attachmentValues = new Map<string, any>();
 
-    if (rowHasID && allAttFields.length > 0) {
+    if (rowHasID) {
       let inlineIdx = 0;
 
-      while (i < lines.length && attachmentValues.size < allAttFields.length) {
+      while (i < lines.length) {
         const aLine = lines[i];
         let aContent: string | null = null;
         if (depth === 0 || aLine.startsWith(ind)) {
@@ -531,12 +536,9 @@ function parseTabularBody(lines: string[], start: number, depth: number, fields:
       if (attachmentValues.has(f)) { row[f] = attachmentValues.get(f); continue; }
     }
 
-    if (!rowHasID || allAttFields.length === 0) {
-      const attIndent = ind + '  ';
-      if (i < lines.length && lines[i].startsWith(attIndent)) {
-        const peek = lines[i].slice(attIndent.length);
-        if (peek.startsWith('.')) throw new Error(`orphan_attachment: ${peek}`);
-      }
+    // Also add any orphan attachment values (fields excluded from column list, e.g. ">" fields).
+    for (const [k, v] of attachmentValues) {
+      if (!(k in row)) row[k] = v;
     }
 
     // Unflatten path columns into nested objects.
@@ -631,6 +633,14 @@ function parseAttachment(lines: string[], lineIdx: number, rest: string, depth: 
     // No shared schema: standard parsing.
     const [arr, consumed] = parseArrayFromHeader(lines, lineIdx, depth, afterName);
     return [name, arr, consumed, null];
+  }
+
+  // Scalar: =value (field names containing ">" excluded from tabular columns).
+  if (afterName.startsWith('=')) {
+    const valStr = afterName.slice(1);
+    const parsed = parseScalar(valStr, true);
+    if (parsed === MISSING) return [name, null, 1, null];
+    return [name, parsed, 1, null];
   }
 
   throw new Error(`invalid attachment form: ${afterName}`);

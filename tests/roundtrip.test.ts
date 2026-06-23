@@ -62,7 +62,7 @@ function genNumber(rng: () => number): number {
 }
 
 const CHARS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-const SPECIAL = ' |,="\\#@\n\t~^+-.';
+const SPECIAL = ' |,="\\#@\n\t~^+-.>';
 
 function genString(rng: () => number): string {
   const n = randInt(rng, 20);
@@ -274,18 +274,19 @@ describe('Graph round-trip', () => {
 describe('Generic property-based round-trip', () => {
   it(`${ITERATIONS} random values`, () => {
     const rng = makeRng(42);
-    let failures = 0;
     for (let i = 0; i < ITERATIONS; i++) {
       const val = genValue(rng, 0, 4);
-      const gcf = encodeGeneric(val);
-      let decoded: any;
-      try {
-        decoded = decodeGeneric(gcf);
-      } catch (e: any) {
-        throw new Error(`iteration ${i}: decode failed: ${e.message}\n  input: ${JSON.stringify(val)}\n  gcf: ${JSON.stringify(gcf)}`);
-      }
-      if (!structuralEqual(jsonNorm(val), jsonNorm(decoded))) {
-        throw new Error(`iteration ${i}: round-trip mismatch\n  input:   ${JSON.stringify(val)}\n  decoded: ${JSON.stringify(decoded)}\n  gcf: ${JSON.stringify(gcf)}`);
+      for (const noFlatten of [false, true]) {
+        const gcf = encodeGeneric(val, { noFlatten });
+        let decoded: any;
+        try {
+          decoded = decodeGeneric(gcf);
+        } catch (e: any) {
+          throw new Error(`iteration ${i} noFlatten=${noFlatten}: decode failed: ${e.message}\n  input: ${JSON.stringify(val)}\n  gcf: ${JSON.stringify(gcf)}`);
+        }
+        if (!structuralEqual(jsonNorm(val), jsonNorm(decoded))) {
+          throw new Error(`iteration ${i} noFlatten=${noFlatten}: round-trip mismatch\n  input:   ${JSON.stringify(val)}\n  decoded: ${JSON.stringify(decoded)}\n  gcf: ${JSON.stringify(gcf)}`);
+        }
       }
     }
   });
@@ -294,15 +295,17 @@ describe('Generic property-based round-trip', () => {
     const rng = makeRng(99);
     for (let i = 0; i < ITERATIONS; i++) {
       const val = genAdversarialValue(rng, 0, 3);
-      const gcf = encodeGeneric(val);
-      let decoded: any;
-      try {
-        decoded = decodeGeneric(gcf);
-      } catch (e: any) {
-        throw new Error(`iteration ${i}: decode failed: ${e.message}\n  input: ${JSON.stringify(val)}\n  gcf: ${JSON.stringify(gcf)}`);
-      }
-      if (!structuralEqual(jsonNorm(val), jsonNorm(decoded))) {
-        throw new Error(`iteration ${i}: round-trip mismatch\n  input:   ${JSON.stringify(val)}\n  decoded: ${JSON.stringify(decoded)}\n  gcf: ${JSON.stringify(gcf)}`);
+      for (const noFlatten of [false, true]) {
+        const gcf = encodeGeneric(val, { noFlatten });
+        let decoded: any;
+        try {
+          decoded = decodeGeneric(gcf);
+        } catch (e: any) {
+          throw new Error(`iteration ${i} noFlatten=${noFlatten}: decode failed: ${e.message}\n  input: ${JSON.stringify(val)}\n  gcf: ${JSON.stringify(gcf)}`);
+        }
+        if (!structuralEqual(jsonNorm(val), jsonNorm(decoded))) {
+          throw new Error(`iteration ${i} noFlatten=${noFlatten}: round-trip mismatch\n  input:   ${JSON.stringify(val)}\n  decoded: ${JSON.stringify(decoded)}\n  gcf: ${JSON.stringify(gcf)}`);
+        }
       }
     }
   });

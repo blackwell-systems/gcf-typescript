@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.2.1 (2026-06-23)
+
+### Flatten Opt-Out
+
+- Added `GenericOptions` interface with `noFlatten` option to disable nested object flattening
+- `encodeGeneric(data, { noFlatten: true })` produces attachment syntax instead of path columns
+- Backward compatible: `encodeGeneric(data)` behavior unchanged (flatten on by default)
+- Fixed: field names containing `>` no longer appear as tabular columns (spec rule 7.4.6.1.4)
+- Fixed: field names containing `>` no longer eligible for flattening analysis
+- Fixed: decoder no longer treats literal `>` in key names as a path separator
+- Fixed: decoder accepts orphan attachments (fields excluded from column list)
+- Fuzz key generator now includes `>` for adversarial testing; 12 targeted edge case tests
+
 ## v2.2.0 (2026-06-22)
 
 ### Spec v3.2: Nested Object Flattening
