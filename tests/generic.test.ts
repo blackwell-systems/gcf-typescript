@@ -53,12 +53,10 @@ describe('encodeGeneric', () => {
     const output = encodeGeneric(data);
     expect(output).toContain('GCF profile=generic');
     expect(output).toContain('project=alpha');
-    // Tabular array with nested field: uses ^ and .field {} attachment.
-    expect(output).toContain('## tasks [2]{id,title,assignee}');
-    expect(output).toContain('@0 1|Setup|^');
-    expect(output).toContain('.assignee {}');
-    expect(output).toContain('name=Alice');
-    expect(output).toContain('name=Bob');
+    // Tabular array with flattened nested field (v3.2).
+    expect(output).toContain('## tasks [2]{id,title,"assignee>name"}');
+    expect(output).toContain('1|Setup|Alice');
+    expect(output).toContain('2|Build|Bob');
   });
 
   it('handles null and undefined values', () => {
