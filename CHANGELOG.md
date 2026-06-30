@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.2.2 (2026-06-30)
+
+### Build
+
+- npm provenance attestations enabled (published from GitHub Actions with `--provenance`)
+- Verifiable build origin: every release links to source commit and CI workflow
+
 ## v2.2.1 (2026-06-23)
 
 ### Flatten Opt-Out
