@@ -87,14 +87,14 @@ function tabularFields(arr: unknown[]): string[] | null {
 function inlineSchemaFields(arr: unknown[], fieldName: string): string[] | null {
   // First row must have the field.
   const first = arr[0] as Record<string, unknown> | undefined;
-  if (!first || !(fieldName in first)) return null;
+  if (!first || !Object.prototype.hasOwnProperty.call(first, fieldName)) return null;
   const firstVal = first[fieldName];
   if (firstVal === null || firstVal === undefined || typeof firstVal !== 'object' || Array.isArray(firstVal)) return null;
 
   let canonicalKeys: string[] | null = null;
   for (const item of arr) {
     const obj = item as Record<string, unknown>;
-    if (!(fieldName in obj) || obj[fieldName] === null || obj[fieldName] === undefined) continue;
+    if (!Object.prototype.hasOwnProperty.call(obj, fieldName) || obj[fieldName] === null || obj[fieldName] === undefined) continue;
     const v = obj[fieldName];
     if (typeof v !== 'object' || Array.isArray(v)) return null;
     const keys = Object.keys(v as Record<string, unknown>);
@@ -119,14 +119,14 @@ function inlineSchemaFields(arr: unknown[], fieldName: string): string[] | null 
 /** Check if array attachment has same tabular schema across all rows (first row must have it). All values must be scalars. */
 function sharedArraySchema(arr: unknown[], fieldName: string): string[] | null {
   const first = arr[0] as Record<string, unknown> | undefined;
-  if (!first || !(fieldName in first)) return null;
+  if (!first || !Object.prototype.hasOwnProperty.call(first, fieldName)) return null;
   const firstVal = first[fieldName];
   if (!Array.isArray(firstVal)) return null;
 
   let canonicalFields: string[] | null = null;
   for (const item of arr) {
     const obj = item as Record<string, unknown>;
-    if (!(fieldName in obj) || obj[fieldName] === null || obj[fieldName] === undefined) continue;
+    if (!Object.prototype.hasOwnProperty.call(obj, fieldName) || obj[fieldName] === null || obj[fieldName] === undefined) continue;
     const v = obj[fieldName];
     if (!Array.isArray(v)) return null;
     const fields = tabularFields(v);
@@ -157,6 +157,12 @@ interface FlatLeaf {
   keys: string[];   // key chain to traverse from row object
 }
 
+// Keys that would pollute Object.prototype if used as a flatten path segment.
+// An object carrying one of these is never flattened; it round-trips whole.
+function isUnsafeKey(k: string): boolean {
+  return k === '__proto__' || k === 'constructor' || k === 'prototype';
+}
+
 function analyzeFlattenable(arr: unknown[], fieldName: string, parentPath: string): FlatLeaf[] | null {
   // Field names containing ">" cannot be flattened (would create ambiguous paths).
   if (fieldName.includes('>')) return null;
@@ -164,16 +170,27 @@ function analyzeFlattenable(arr: unknown[], fieldName: string, parentPath: strin
 
   for (const item of arr) {
     const obj = item as Record<string, unknown>;
-    if (!(fieldName in obj) || obj[fieldName] === null || obj[fieldName] === undefined) continue;
+    if (!Object.prototype.hasOwnProperty.call(obj, fieldName) || obj[fieldName] === undefined) continue;
+    if (obj[fieldName] === null) {
+      // A nested (non-top-level) null cannot be flattened losslessly: its leaves would
+      // encode as absent ("~") and unflatten back to a missing key, not null. Bail to
+      // the whole-object (attachment) path. A top-level null is fine: it emits "-" and
+      // reconstructs via the all-null rule (Section 7.4.6 / fixture 013), so just skip
+      // the row from shape analysis.
+      if (parentPath !== '') return null;
+      continue;
+    }
     const v = obj[fieldName];
     if (typeof v !== 'object' || Array.isArray(v)) return null;
 
     const keys = Object.keys(v as Record<string, unknown>);
 
     if (!canonicalShape) {
-      canonicalShape = {};
+      // Null-prototype map so `k in canonicalShape` only sees own keys, and reject
+      // prototype-pollution keys outright (never flattened; round-trip whole).
+      canonicalShape = Object.create(null) as Record<string, 'scalar' | 'nested'>;
       for (const k of keys) {
-        if (k.includes('>')) return null;
+        if (k.includes('>') || isUnsafeKey(k)) return null;
         const val = (v as Record<string, unknown>)[k];
         if (val !== null && val !== undefined && typeof val === 'object' && !Array.isArray(val)) {
           canonicalShape[k] = 'nested';
@@ -186,7 +203,7 @@ function analyzeFlattenable(arr: unknown[], fieldName: string, parentPath: strin
     } else {
       if (keys.length !== Object.keys(canonicalShape).length) return null;
       for (const k of keys) {
-        if (!(k in canonicalShape)) return null;
+        if (!Object.prototype.hasOwnProperty.call(canonicalShape, k)) return null;
         const val = (v as Record<string, unknown>)[k];
         const expected = canonicalShape[k];
         if (expected === 'scalar') {
@@ -212,7 +229,7 @@ function analyzeFlattenable(arr: unknown[], fieldName: string, parentPath: strin
     } else {
       const subArr = arr.map(item => {
         const obj = item as Record<string, unknown>;
-        if (!(fieldName in obj) || obj[fieldName] === null || obj[fieldName] === undefined) return {};
+        if (!Object.prototype.hasOwnProperty.call(obj, fieldName) || obj[fieldName] === null || obj[fieldName] === undefined) return {};
         return obj[fieldName];
       });
       const subLeaves = analyzeFlattenable(subArr as unknown[], k, currentPath);
@@ -225,7 +242,7 @@ function analyzeFlattenable(arr: unknown[], fieldName: string, parentPath: strin
   if (leaves.length > 0) {
     for (const item of arr) {
       const obj = item as Record<string, unknown>;
-      if (!(fieldName in obj) || obj[fieldName] === null || obj[fieldName] === undefined) continue;
+      if (!Object.prototype.hasOwnProperty.call(obj, fieldName) || obj[fieldName] === null || obj[fieldName] === undefined) continue;
       const allNull = leaves.every(leaf => {
         const val = resolveKeyChain(item, leaf.keys);
         return val.exists && val.value === null;
@@ -241,13 +258,13 @@ function resolveKeyChain(item: unknown, keys: string[]): { value: unknown; exist
   if (keys.length === 0) return { value: undefined, exists: false };
   const obj = item as Record<string, unknown>;
   if (typeof obj !== 'object' || obj === null) return { value: undefined, exists: false };
-  if (!(keys[0] in obj)) return { value: undefined, exists: false };
+  if (!Object.prototype.hasOwnProperty.call(obj, keys[0])) return { value: undefined, exists: false };
   let current: unknown = obj[keys[0]];
   if (current === null || current === undefined) return { value: current, exists: true };
   for (let i = 1; i < keys.length; i++) {
     if (typeof current !== 'object' || current === null) return { value: undefined, exists: false };
     const c = current as Record<string, unknown>;
-    if (!(keys[i] in c)) return { value: undefined, exists: false };
+    if (!Object.prototype.hasOwnProperty.call(c, keys[i])) return { value: undefined, exists: false };
     current = c[keys[i]];
   }
   return { value: current, exists: true };
@@ -323,7 +340,7 @@ function encodeTabular(headerPrefix: string, arr: unknown[], fields: string[], d
     for (const col of columns) {
       if (col.colType === 'flat') {
         // Resolve value via key chain.
-        if (!(col.keys[0] in obj)) {
+        if (!Object.prototype.hasOwnProperty.call(obj, col.keys[0])) {
           cells.push('~');
         } else {
           // Check if top-level field is null.
@@ -346,7 +363,7 @@ function encodeTabular(headerPrefix: string, arr: unknown[], fields: string[], d
 
       // Original (non-flattened) field.
       const f = col.field;
-      if (!(f in obj)) { cells.push('~'); continue; }
+      if (!Object.prototype.hasOwnProperty.call(obj, f)) { cells.push('~'); continue; }
       const v = obj[f];
       if (v === null || v === undefined) { cells.push('-'); continue; }
       if (typeof v === 'object') {
@@ -372,8 +389,7 @@ function encodeTabular(headerPrefix: string, arr: unknown[], fields: string[], d
     // Emit fields with ">" in their names as per-row attachments.
     for (const f of fields) {
       if (!gtFields.has(f)) continue;
-      const obj = arr[i] as Record<string, unknown>;
-      if (!(f in obj)) continue;
+      if (!Object.prototype.hasOwnProperty.call(obj, f)) continue;
       rowHasAttachment = true;
       attachments.push({ name: f, value: obj[f], inline: false });
     }
@@ -445,7 +461,7 @@ function encodeAttachmentArrayShared(attPrefix: string, fk: string, arr: unknown
     for (const item of arr) {
       const obj = item as Record<string, unknown>;
       const cells = sharedFields.map(f => {
-        if (!(f in obj)) return '~';
+        if (!Object.prototype.hasOwnProperty.call(obj, f)) return '~';
         if (obj[f] === null || obj[f] === undefined) return '-';
         return formatScalar(obj[f], 0x7c);
       });
