@@ -269,9 +269,80 @@ describe('Graph round-trip', () => {
   });
 });
 
+// --- Flatten-path generator: aligned arrays whose shared fields are nested
+// objects (fixed shape across rows), with a field or an intermediate nested
+// level sometimes null / absent. This is the shape the v3.2 flatten/unflatten
+// path requires and that the scalar-only tabular generator above never emits. ---
+
+type Shape = 'scalar' | Record<string, any>;
+
+function genShape(rng: () => number, depth: number, maxDepth: number): Shape {
+  if (depth >= maxDepth || rng() < 0.45) return 'scalar';
+  const n = 1 + randInt(rng, 3);
+  const shape: Record<string, any> = {};
+  for (let i = 0; i < n; i++) shape[genBareKey(rng)] = genShape(rng, depth + 1, maxDepth);
+  return Object.keys(shape).length ? shape : 'scalar';
+}
+
+function materializeShape(rng: () => number, shape: Shape): any {
+  if (shape === 'scalar') return genScalar(rng);
+  const obj: Record<string, any> = {};
+  for (const k of Object.keys(shape)) {
+    const sub = (shape as Record<string, any>)[k];
+    // A nested sub-object is sometimes null (intermediate null — the case the
+    // pre-fix encoder dropped) instead of a full object.
+    obj[k] = sub !== 'scalar' && rng() < 0.3 ? null : materializeShape(rng, sub);
+  }
+  return obj;
+}
+
+function genFlattenableArray(rng: () => number): any[] {
+  const rows = 2 + randInt(rng, 6);
+  const schema: Record<string, any> = { id: 'scalar' };
+  let hasNested = false;
+  const nFields = 1 + randInt(rng, 3);
+  for (let i = 0; i < nFields; i++) {
+    const s = genShape(rng, 1, 3);
+    schema[genBareKey(rng)] = s;
+    if (s !== 'scalar') hasNested = true;
+  }
+  if (!hasNested) schema[genBareKey(rng)] = { [genBareKey(rng)]: { [genBareKey(rng)]: 'scalar' } };
+  const arr: any[] = [];
+  for (let i = 0; i < rows; i++) {
+    const row: Record<string, any> = {};
+    for (const f of Object.keys(schema)) {
+      const r = rng();
+      if (r < 0.12) continue; // field absent this row
+      else if (r < 0.24) row[f] = null; // field present-null (top-level null)
+      else row[f] = materializeShape(rng, schema[f]); // present (with possible intermediate nulls)
+    }
+    arr.push(row);
+  }
+  return arr;
+}
+
 // --- Generic property-based round-trip ---
 
 describe('Generic property-based round-trip', () => {
+  it(`${ITERATIONS} aligned nested arrays (flatten path, null at depth)`, () => {
+    const rng = makeRng(7);
+    for (let i = 0; i < ITERATIONS; i++) {
+      const val = genFlattenableArray(rng);
+      for (const noFlatten of [false, true]) {
+        const gcf = encodeGeneric(val, { noFlatten });
+        let decoded: any;
+        try {
+          decoded = decodeGeneric(gcf);
+        } catch (e: any) {
+          throw new Error(`iteration ${i} noFlatten=${noFlatten}: decode failed: ${e.message}\n  input: ${JSON.stringify(val)}\n  gcf: ${JSON.stringify(gcf)}`);
+        }
+        if (!structuralEqual(jsonNorm(val), jsonNorm(decoded))) {
+          throw new Error(`iteration ${i} noFlatten=${noFlatten}: round-trip mismatch\n  input:   ${JSON.stringify(val)}\n  decoded: ${JSON.stringify(decoded)}\n  gcf: ${JSON.stringify(gcf)}`);
+        }
+      }
+    }
+  });
+
   it(`${ITERATIONS} random values`, () => {
     const rng = makeRng(42);
     for (let i = 0; i < ITERATIONS; i++) {
