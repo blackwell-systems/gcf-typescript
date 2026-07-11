@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.2.3 (2026-07-10)
+
+### Fixes
+
+- **Losslessness (nested null):** a nested object that is null at an intermediate level (e.g. `{meta:{owner:null}}`) is no longer flattened. Previously its leaves encoded as absent (`~`) and unflattened to a missing key, silently dropping the null. Such fields now fall back to the attachment mechanism; a top-level null still flattens losslessly (emits `-`, reconstructs via the all-null rule). This is a cross-SDK format-logic bug; regression fixtures added to the conformance suite (`flatten/017`–`019`).
+- **Prototype pollution (JS/TS-specific):** the generic decoder no longer mutates `Object.prototype`. `unflattenPaths`, `checkDup`, the object-build assignments and the tabular row merge used `key in obj` and bracket assignment, so a `__proto__` path segment could pollute the prototype and any key shadowing an `Object.prototype` member (`toString`/`constructor`) was misparsed as a duplicate. Membership now uses `Object.prototype.hasOwnProperty.call`; a shared `safeAssign` writes a literal `__proto__` as an own property via `Object.defineProperty`; `unflattenPaths` drops unsafe path segments and guards non-object intermediates; `canonicalShape` uses `Object.create(null)` and rejects `__proto__`/`constructor`/`prototype`. Keys named `toString`/`constructor`/`valueOf` now round-trip correctly.
+- Strict count parsing: shared-schema row counts use the strict `parseCount` helper instead of a loose `parseInt`.
+
+### Tests
+
+- `prototype_pollution.test.ts`: nested and top-level `__proto__` own-keys, hostile `>__proto__>` path column, and built-in-named keys.
+- Property-based round-trip now exercises the v3.2 flatten path: `genFlattenableArray` generates aligned arrays whose shared fields are fixed-shape nested objects with a field or an intermediate level sometimes null/absent — the shape the prior scalar-only generator never produced. Verified to fail on the pre-fix encoder and pass on the fix (500k iterations).
+
 ## v2.2.2 (2026-06-30)
 
 ### Build
