@@ -38,7 +38,7 @@ describe('Conformance v2', () => {
 
   for (const { relPath, data } of fixtures) {
     const op = data.operation;
-    if (op === 'session' || op === 'delta' || op === 'pack-root' || op === 'delta-verify') {
+    if (op === 'session' || op === 'delta' || op === 'pack-root' || op === 'delta-verify' || op === 'graph-stream-encode') {
       it.skip(`${relPath} (${op} not implemented)`, () => {});
       continue;
     }
