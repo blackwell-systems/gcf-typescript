@@ -1,6 +1,6 @@
 {
   "name": "@blackwell-systems/gcf",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "The AI-native wire format for structured data. 50-92% fewer tokens than JSON, with multi-turn delta encoding for agent loops. 100% comprehension on every frontier model. Zero dependencies.",
   "type": "module",
   "main": "./dist/index.js",
