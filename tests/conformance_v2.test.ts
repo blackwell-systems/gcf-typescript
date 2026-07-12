@@ -47,9 +47,13 @@ describe('Conformance v2', () => {
       it.skip(`${relPath} (binary input)`, () => {});
       continue;
     }
-    // Skip a fixture requesting stream options this runner does not support
-    // (e.g. labeledTrailerCounts, SPEC 8.4.1). This runner supports none.
-    if (op === 'graph-stream-encode' && data.options && Object.keys(data.options).length > 0) {
+    // Skip a fixture requesting stream options this runner does not support.
+    // labeledTrailerCounts (SPEC 8.4.1) IS supported; any other option key is not.
+    if (
+      op === 'graph-stream-encode' &&
+      data.options &&
+      Object.keys(data.options).some((k) => k !== 'labeledTrailerCounts')
+    ) {
       it.skip(`${relPath} (unsupported stream options)`, () => {});
       continue;
     }
@@ -169,6 +173,7 @@ describe('Conformance v2', () => {
               tokenBudget: inp.tokenBudget,
               tokensUsed: inp.tokensUsed,
               packRoot: inp.packRoot,
+              labeledTrailerCounts: data.options?.labeledTrailerCounts,
             },
           );
           for (const s of inp.symbols ?? []) {

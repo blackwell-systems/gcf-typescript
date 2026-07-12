@@ -9,6 +9,13 @@ export interface StreamOptions {
   tokensUsed?: number;
   packRoot?: string;
   session?: boolean;
+  /**
+   * Opt into the labeled trailer counts form (SPEC §8.4.1): the graph
+   * "##! summary" counts field is emitted as label:count per entry
+   * (e.g. counts=targets:1,related:1,edges:1). Default/undefined emits the
+   * positional form (counts=1,1,1), unchanged and byte-identical to today.
+   */
+  labeledTrailerCounts?: boolean;
 }
 
 /**
@@ -41,9 +48,11 @@ export class StreamEncoder {
   private groupCounts: Map<string, number> = new Map();
   private edgeCount = 0;
   private edgesStarted = false;
+  private labeledTrailerCounts = false;
 
   constructor(w: StreamWriter, tool: string, opts: StreamOptions = {}) {
     this.w = w;
+    this.labeledTrailerCounts = opts.labeledTrailerCounts ?? false;
     this.writeHeader(tool, opts);
   }
 
@@ -129,21 +138,26 @@ export class StreamEncoder {
    * symbols and edges have been written.
    */
   close(): void {
-    const deferredCounts: number[] = [];
+    // Build sections as label:count pairs; positional form strips to values.
+    const sections: string[] = [];
     const groupOrder = ['targets', 'related', 'extended'];
 
     for (const g of groupOrder) {
       const c = this.groupCounts.get(g);
-      if (c && c > 0) deferredCounts.push(c);
+      if (c && c > 0) sections.push(`${g}:${c}`);
     }
     for (const [g, c] of this.groupCounts) {
-      if (!groupOrder.includes(g) && c > 0) deferredCounts.push(c);
+      if (!groupOrder.includes(g) && c > 0) sections.push(`${g}:${c}`);
     }
     if (this.edgeCount > 0) {
-      deferredCounts.push(this.edgeCount);
+      sections.push(`edges:${this.edgeCount}`);
     }
 
-    this.w.write(`##! summary symbols=${this.nextID} edges=${this.edgeCount} counts=${deferredCounts.join(',')}\n`);
+    const countsStr = this.labeledTrailerCounts
+      ? sections.join(',')
+      : sections.map((s) => s.split(':', 2)[1]).join(',');
+
+    this.w.write(`##! summary symbols=${this.nextID} edges=${this.edgeCount} counts=${countsStr}\n`);
   }
 
   /** Number of symbols written so far. */
