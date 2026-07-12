@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   encode, encodeGeneric, decodeGeneric,
   genericPackRoot, encodeGenericDelta, decodeGenericDelta, verifyGenericDelta,
+  GenericDeltaSession, fixedN, sizeGuard, type ReanchorPolicy,
   type GenericSet, type GenericDeltaPayload,
 } from '../src/index.js';
 import type { Payload, Symbol, Edge } from '../src/index.js';
@@ -132,6 +133,22 @@ describe('Conformance v2', () => {
           } else {
             const res = verifyGenericDelta(base, decodeGenericDelta(inp.wire), inp.expectedNewRoot);
             expect(genericPackRoot(res)).toBe(data.expected);
+          }
+          break;
+        }
+        case 'generic-delta-session': {
+          const inp = data.input;
+          const mkSet = (o: any): GenericSet => ({ name: o.name, key: o.key, fields: o.fields, rows: o.rows });
+          const policy: ReanchorPolicy = inp.policy.mode === 'sizeGuard'
+            ? sizeGuard()
+            : fixedN(inp.policy.n);
+          const s = new GenericDeltaSession(mkSet(inp.base), inp.tool, policy);
+          expect(s.currentFull()).toBe(data.expected.initialFull);
+          const updates = inp.updates ?? [];
+          for (let i = 0; i < updates.length; i++) {
+            const em = s.next(mkSet(updates[i]));
+            const want = data.expected.emissions[i];
+            expect({ isFull: em.isFull, wire: em.wire }).toEqual({ isFull: want.isFull, wire: want.wire });
           }
           break;
         }

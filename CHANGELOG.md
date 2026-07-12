@@ -11,6 +11,7 @@
   - `decodeGenericFull`, `decodeGenericDelta` (consumer wire parsing)
   - `verifyGenericDelta` (atomic apply + `new_root` verification)
 - Delta is opt-in and bilateral; the existing `encodeGeneric` path is unchanged (backward compatible). Node-only (uses `crypto.createHash`), exported from the main entry alongside `packRoot`/`verifyDelta`.
+- `GenericDeltaSession` (SPEC §10a.8): producer-side re-anchor cadence helper over the delta primitives. Emits either a compact delta or, on its policy's cadence, a full re-anchor (a schema change always forces a full per §10a.7); introduces no new wire syntax. Policies: `fixedN(n)` (default `DEFAULT_REANCHOR_N = 15`) and `sizeGuard()` (re-anchors once cumulative delta bytes reach the current full-payload byte size). Byte-length comparisons use UTF-8 bytes (`Buffer.byteLength`) to match Go's `len(string)`, so cadence is identical across SDKs. Exports: `GenericDeltaSession`, `ReanchorMode`, `fixedN`, `sizeGuard`, `DEFAULT_REANCHOR_N`, `ReanchorPolicy`. Shared conformance fixtures `generic-delta-session/001`–`003` verified against `gcf-go`.
 
 ### Tests
 

@@ -20,6 +20,16 @@ export {
   type GenericSet,
   type GenericDeltaPayload,
 } from './generic_delta.js';
+// Generic-profile delta session helper (SPEC Section 10a.8). Node-only.
+export {
+  GenericDeltaSession,
+  ReanchorMode,
+  fixedN,
+  sizeGuard,
+  DEFAULT_REANCHOR_N,
+  type ReanchorPolicy,
+  type SessionEmission,
+} from './generic_delta_session.js';
 export { formatScalar, formatKey, parseScalar, needsQuote, quoteString } from './scalar.js';
 export { StreamEncoder, type StreamWriter, type StreamOptions } from './stream.js';
 export { GenericStreamEncoder } from './stream_generic.js';
