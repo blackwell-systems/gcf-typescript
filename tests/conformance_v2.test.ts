@@ -4,6 +4,7 @@ import {
   genericPackRoot, encodeGenericDelta, decodeGenericDelta, verifyGenericDelta,
   GenericDeltaSession, fixedN, sizeGuard, type ReanchorPolicy,
   type GenericSet, type GenericDeltaPayload,
+  StreamEncoder,
 } from '../src/index.js';
 import type { Payload, Symbol, Edge } from '../src/index.js';
 import * as fs from 'fs';
@@ -38,7 +39,7 @@ describe('Conformance v2', () => {
 
   for (const { relPath, data } of fixtures) {
     const op = data.operation;
-    if (op === 'session' || op === 'delta' || op === 'pack-root' || op === 'delta-verify' || op === 'graph-stream-encode') {
+    if (op === 'session' || op === 'delta' || op === 'pack-root' || op === 'delta-verify') {
       it.skip(`${relPath} (${op} not implemented)`, () => {});
       continue;
     }
@@ -150,6 +151,39 @@ describe('Conformance v2', () => {
             const want = data.expected.emissions[i];
             expect({ isFull: em.isFull, wire: em.wire }).toEqual({ isFull: want.isFull, wire: want.wire });
           }
+          break;
+        }
+        case 'graph-stream-encode': {
+          const inp = data.input;
+          const chunks: string[] = [];
+          const enc = new StreamEncoder(
+            { write: (s) => chunks.push(s) },
+            inp.tool,
+            {
+              tokenBudget: inp.tokenBudget,
+              tokensUsed: inp.tokensUsed,
+              packRoot: inp.packRoot,
+            },
+          );
+          for (const s of inp.symbols ?? []) {
+            enc.writeSymbol({
+              qualifiedName: s.qualifiedName,
+              kind: s.kind,
+              score: s.score,
+              provenance: s.provenance,
+              distance: s.distance,
+            });
+          }
+          for (const e of inp.edges ?? []) {
+            enc.writeEdge({
+              source: e.source,
+              target: e.target,
+              edgeType: e.edgeType,
+              status: e.status ?? undefined,
+            });
+          }
+          enc.close();
+          expect(chunks.join('')).toBe(data.expected);
           break;
         }
         default:
