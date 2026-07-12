@@ -167,6 +167,58 @@ Output:
 
 Works on objects, arrays, and primitives. Arrays of uniform objects get tabular rows. Nested objects use `## key` section headers.
 
+## Generic-Profile Delta (multi-turn)
+
+In an agent loop the same keyed table gets re-queried turn after turn. Instead of re-sending the whole table each time, send only the changed rows (SPEC §10a):
+
+```typescript
+import {
+  diffGenericSets,
+  encodeGenericDelta,
+  verifyGenericDelta,
+  type GenericSet,
+} from '@blackwell-systems/gcf';
+
+const base: GenericSet = {
+  key: 'id',
+  fields: ['id', 'status'],
+  rows: [
+    { id: 1001, status: 'pending' },
+    { id: 1002, status: 'shipped' },
+  ],
+};
+const next: GenericSet = {
+  key: 'id',
+  fields: ['id', 'status'],
+  rows: [
+    { id: 1001, status: 'shipped' }, // changed
+    { id: 1003, status: 'pending' }, // added (1002 removed)
+  ],
+};
+
+const d = diffGenericSets(base, next);          // GenericDeltaPayload
+const wire = encodeGenericDelta(d);             // ## added / ## changed / ## removed
+const held = verifyGenericDelta(base, d, d.newRoot); // atomic apply + new_root verification
+```
+
+Opt-in and bilateral, keyed on content-addressed pack roots. By the 5th overlapping call, ~97% fewer tokens than re-sending JSON.
+
+### Re-anchor session helper
+
+`GenericDeltaSession` manages the delta/re-anchor cadence for you: each `next()` returns either a compact delta or, on its cadence, a full re-anchor (which re-grounds the consumer), updating its held base.
+
+```typescript
+import { GenericDeltaSession, sizeGuard } from '@blackwell-systems/gcf';
+
+const sess = new GenericDeltaSession(base, 'orders', sizeGuard());
+let wire = sess.currentFull();                  // transmit the base once to establish it
+for (const snapshot of stream) {                // each turn's current GenericSet
+  const { wire, isFull } = sess.next(snapshot); // a compact delta, or a periodic full re-anchor
+}
+```
+
+`fixedN(15)` re-anchors every N turns; `sizeGuard()` (recommended) re-anchors once the cumulative delta reaches a full payload's size. It introduces no new wire syntax and the decoder stays cadence-agnostic, so a re-anchor is just the protocol's "full" outcome on a schedule.
+
 ## API
 
 | Function | Description |
@@ -177,6 +229,10 @@ Works on objects, arrays, and primitives. Arrays of uniform objects get tabular 
 | `encodeWithSession(p: Payload, s: Session): string` | Encode with session deduplication |
 | `new StreamEncoder(w, tool, opts)` | Create a streaming encoder (zero-buffering) |
 | `encodeDelta(d: DeltaPayload): string` | Encode a delta (added/removed only) |
+| `diffGenericSets(base, next): GenericDeltaPayload` | Diff two keyed record sets (generic profile) |
+| `encodeGenericDelta(d): string` / `decodeGenericDelta(s)` | Generic-profile delta wire (§10a) |
+| `verifyGenericDelta(base, d, root): GenericSet` | Atomic apply + `new_root` verification |
+| `new GenericDeltaSession(base, tool, policy)` | Producer-side re-anchor cadence helper (§10a.8) |
 | `new Session()` | Create a new session tracker |
 
 ## Types
@@ -187,6 +243,8 @@ Works on objects, arrays, and primitives. Arrays of uniform objects get tabular 
 | `Symbol` | Graph node: qualified name, kind, score, provenance, distance |
 | `Edge` | Directed relationship: source, target, edge type |
 | `DeltaPayload` | Diff between two packs: added/removed symbols and edges |
+| `GenericSet` / `GenericDeltaPayload` | Keyed record set and its generic-profile diff (§10a) |
+| `GenericDeltaSession` | Stateful producer that schedules delta vs full re-anchor (§10a.8) |
 | `Session` | Tracker for multi-call deduplication |
 | `KIND_ABBREV` / `KIND_EXPAND` | Bidirectional kind abbreviation maps |
 

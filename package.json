@@ -1,7 +1,7 @@
 {
   "name": "@blackwell-systems/gcf",
   "version": "2.3.0",
-  "description": "The AI-native wire format for structured data. 50-92% fewer tokens than JSON. 100% comprehension on every frontier model. Zero dependencies.",
+  "description": "The AI-native wire format for structured data. 50-92% fewer tokens than JSON, with multi-turn delta encoding for agent loops. 100% comprehension on every frontier model. Zero dependencies.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -41,7 +41,10 @@
     "llm",
     "tokens",
     "mcp",
-    "wire-format"
+    "wire-format",
+    "delta",
+    "multi-turn",
+    "agents"
   ],
   "author": "Blackwell Systems",
   "license": "MIT",
@@ -49,7 +52,7 @@
     "type": "git",
     "url": "git+https://github.com/blackwell-systems/gcf-typescript.git"
   },
-  "homepage": "https://github.com/blackwell-systems/gcf",
+  "homepage": "https://gcformat.com/",
   "devDependencies": {
     "@types/node": "^22.0.0",
     "typescript": "^5.4.0",

@@ -13,7 +13,11 @@ jobs:
       matrix:
         node-version: ['18', '20', '22']
     steps:
+      # Check out gcf-typescript and the shared-fixtures gcf repo as SIBLINGS so the
+      # conformance runner's ../../gcf/tests/conformance path resolves on CI.
       - uses: actions/checkout@v4
+        with:
+          path: gcf-typescript
       - uses: actions/checkout@v4
         with:
           repository: blackwell-systems/gcf
@@ -22,10 +26,15 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
       - run: npm ci
+        working-directory: gcf-typescript
       - run: npx tsc --noEmit
+        working-directory: gcf-typescript
       - name: Unit tests
         run: npx vitest run --reporter=verbose --exclude tests/conformance_v2.test.ts --exclude tests/roundtrip.test.ts
-      - name: Conformance tests (133 fixtures)
+        working-directory: gcf-typescript
+      - name: Conformance tests (shared fixtures)
         run: npx vitest run tests/conformance_v2.test.ts --reporter=verbose
+        working-directory: gcf-typescript
       - name: Property-based round-trip (100K random + 100K adversarial)
         run: npx vitest run tests/roundtrip.test.ts --reporter=verbose
+        working-directory: gcf-typescript
