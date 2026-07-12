@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { encode, encodeGeneric, decodeGeneric } from '../src/index.js';
+import {
+  encode, encodeGeneric, decodeGeneric,
+  genericPackRoot, encodeGenericDelta, decodeGenericDelta, verifyGenericDelta,
+  type GenericSet, type GenericDeltaPayload,
+} from '../src/index.js';
 import type { Payload, Symbol, Edge } from '../src/index.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -85,6 +89,50 @@ describe('Conformance v2', () => {
           // v3 decoder may surface different error categories for the same invalid input.
           // The requirement is that it rejects; the exact category may differ.
           expect(() => decodeGeneric(inputStr)).toThrow();
+          break;
+        }
+        case 'generic-pack-root': {
+          const inp = data.input;
+          const got = genericPackRoot({ key: inp.key, fields: inp.fields, rows: inp.rows });
+          expect(got).toBe(data.expected);
+          break;
+        }
+        case 'generic-delta': {
+          const inp = data.input;
+          const d: GenericDeltaPayload = {
+            tool: inp.tool, key: inp.key, fields: inp.fields,
+            baseRoot: inp.baseRoot, newRoot: inp.newRoot,
+            added: inp.added ?? [], changed: inp.changed ?? [], removed: inp.removed ?? [],
+            deltaTokens: inp.deltaTokens, fullTokens: inp.fullTokens,
+          };
+          expect(encodeGenericDelta(d)).toBe(data.expected);
+          break;
+        }
+        case 'generic-delta-verify': {
+          const inp = data.input;
+          const base: GenericSet = { key: inp.base.key, fields: inp.base.fields, rows: inp.base.rows };
+          const dd = inp.delta;
+          const d: GenericDeltaPayload = {
+            key: dd.key, fields: dd.fields, baseRoot: dd.baseRoot, newRoot: dd.newRoot ?? '',
+            added: dd.added ?? [], changed: dd.changed ?? [], removed: dd.removed ?? [],
+          };
+          if (data.expectedError) {
+            expect(() => verifyGenericDelta(base, d, inp.expectedNewRoot)).toThrow(data.expectedError);
+          } else {
+            const res = verifyGenericDelta(base, d, inp.expectedNewRoot);
+            expect(genericPackRoot(res)).toBe(data.expected);
+          }
+          break;
+        }
+        case 'generic-delta-decode': {
+          const inp = data.input;
+          const base: GenericSet = { key: inp.base.key, fields: inp.base.fields, rows: inp.base.rows };
+          if (data.expectedError) {
+            expect(() => verifyGenericDelta(base, decodeGenericDelta(inp.wire), inp.expectedNewRoot)).toThrow(data.expectedError);
+          } else {
+            const res = verifyGenericDelta(base, decodeGenericDelta(inp.wire), inp.expectedNewRoot);
+            expect(genericPackRoot(res)).toBe(data.expected);
+          }
           break;
         }
         default:

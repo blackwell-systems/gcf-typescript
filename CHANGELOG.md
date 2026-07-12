@@ -1,5 +1,22 @@
 # Changelog
 
+## v2.3.0 (unreleased)
+
+### Generic-profile delta encoding (SPEC §10a)
+
+- Full producer + consumer implementation of generic-profile delta, byte-for-byte interoperable with `gcf-go` and `gcf-python`:
+  - `GenericSet` (keyed record set), `GenericDeltaPayload`
+  - `genericPackRoot` (`gcf-pack-root-v1`, generic profile) with a purpose-built cell canonicalization (`canonicalCell`) decoupled from the wire cell encoder: collision-free (null/bool/number bare, strings always quoted) and record-safe. Fields and records sort by UTF-8 byte order (`Buffer.compare`) to match Go's `sort.Strings`, so pack roots are identical across SDKs.
+  - `diffGenericSets` (the blessed producer path; centralizes the keyed-diff invariants), `encodeGenericFull`, `encodeGenericDelta`
+  - `decodeGenericFull`, `decodeGenericDelta` (consumer wire parsing)
+  - `verifyGenericDelta` (atomic apply + `new_root` verification)
+- Delta is opt-in and bilateral; the existing `encodeGeneric` path is unchanged (backward compatible). Node-only (uses `crypto.createHash`), exported from the main entry alongside `packRoot`/`verifyDelta`.
+
+### Tests
+
+- Unit suite mirroring `gcf-go`/`gcf-python`: self-proving round-trip (diff -> encode -> apply -> recomputed root), determinism / row-order invariance, no-type-collision canonicalization, every invariant/error path, full-payload wire round-trip, the complete server -> wire -> consumer end-to-end loop, and malformed-wire-fails-closed.
+- Conformance runner support for `generic-pack-root`, `generic-delta`, `generic-delta-verify`, `generic-delta-decode` (12 shared fixtures); verified to produce identical pack roots and delta wire to `gcf-go` and `gcf-python`.
+
 ## v2.2.3 (2026-07-10)
 
 ### Fixes
