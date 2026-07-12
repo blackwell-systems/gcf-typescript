@@ -105,7 +105,7 @@ enc.writeSymbol({ qualifiedName: 'pkg.Server', kind: 'function', score: 0.60, pr
 // Edges emit immediately too.
 enc.writeEdge({ source: 'pkg.Server', target: 'pkg.Auth', edgeType: 'calls' });
 
-// Close emits the ## _summary trailer with final counts.
+// Close emits the ##! summary trailer with final counts.
 enc.close();
 ```
 
@@ -118,7 +118,7 @@ GCF tool=context_for_task budget=5000
 @1 fn pkg.Server 0.60 lsp
 ## edges [?]
 @0<@1 calls
-## _summary symbols=2 edges=1 sections=targets:1,related:1,edges:1
+##! summary symbols=2 edges=1 counts=1,1,1
 ```
 
 The `writer` is any object with a `write(s: string)` method (Node.js streams, web WritableStreams, or a simple callback). Standard `decode()` handles streaming output with no changes.
