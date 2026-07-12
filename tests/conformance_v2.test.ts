@@ -47,6 +47,12 @@ describe('Conformance v2', () => {
       it.skip(`${relPath} (binary input)`, () => {});
       continue;
     }
+    // Skip a fixture requesting stream options this runner does not support
+    // (e.g. labeledTrailerCounts, SPEC 8.4.1). This runner supports none.
+    if (op === 'graph-stream-encode' && data.options && Object.keys(data.options).length > 0) {
+      it.skip(`${relPath} (unsupported stream options)`, () => {});
+      continue;
+    }
 
     it(relPath, () => {
       switch (op) {
