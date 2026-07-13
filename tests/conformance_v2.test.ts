@@ -7,6 +7,7 @@ import {
   StreamEncoder,
 } from '../src/index.js';
 import type { Payload, Symbol, Edge } from '../src/index.js';
+import { packRoot } from '../src/packroot.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -48,7 +49,7 @@ describe('Conformance v2', () => {
 
   for (const { relPath, data } of fixtures) {
     const op = data.operation;
-    if (op === 'session' || op === 'delta' || op === 'pack-root' || op === 'delta-verify') {
+    if (op === 'session' || op === 'delta' || op === 'delta-verify') {
       it.skip(`${relPath} (${op} not implemented)`, () => {});
       continue;
     }
@@ -170,6 +171,25 @@ describe('Conformance v2', () => {
             const want = data.expected.emissions[i];
             expect({ isFull: em.isFull, wire: em.wire }).toEqual({ isFull: want.isFull, wire: want.wire });
           }
+          break;
+        }
+        case 'pack-root': {
+          const inp = data.input;
+          const symbols: Symbol[] = (inp.symbols ?? []).map((s: any) => ({
+            qualifiedName: s.qualifiedName,
+            kind: s.kind,
+            score: s.score,
+            provenance: s.provenance,
+            distance: s.distance,
+          }));
+          const edges: Edge[] = (inp.edges ?? []).map((e: any) => ({
+            source: e.source,
+            target: e.target,
+            edgeType: e.edgeType,
+            status: e.status ?? undefined,
+          }));
+          const got = packRoot(symbols, edges);
+          expect(got).toBe(data.expected);
           break;
         }
         case 'graph-stream-encode': {
