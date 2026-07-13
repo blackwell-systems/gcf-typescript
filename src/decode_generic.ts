@@ -453,6 +453,11 @@ function parseTabularBody(lines: string[], start: number, depth: number, fields:
     const allAttFields = [...traditionalAttFields, ...inlineAttFields];
     const attachmentValues = new Map<string, any>();
 
+    // Expected attachment names = columns of THIS row whose cell was "^" or "^{...}".
+    // Any ".fieldname" attachment not in this set (and not a ">"-flatten fallback)
+    // is an orphan that no encoder would produce: reject for lossless round-trip.
+    const expectedAtt = new Set<string>(allAttFields);
+
     if (rowHasID) {
       let inlineIdx = 0;
 
@@ -475,6 +480,12 @@ function parseTabularBody(lines: string[], start: number, depth: number, fields:
         if (attContent.startsWith('.')) {
           const rest = attContent.slice(1);
           const [attName, afterName] = parseAttachmentName(rest);
+
+          // Reject orphan attachments: a ".fieldname" whose name does not bind to a
+          // "^"-marked column and is not a ">"-flatten fallback (SPEC 7.4.6.1.4).
+          if (!expectedAtt.has(attName) && !attName.includes('>')) {
+            throw new Error(`orphan_attachment: ${attName}`);
+          }
 
           // Check if this is an inline schema field with pipe-delimited data.
           const ifs = inlineSchemas.get(attName);
