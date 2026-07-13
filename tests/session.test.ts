@@ -114,12 +114,13 @@ describe('encodeWithSession', () => {
     };
 
     const out2 = encodeWithSession(p2, sess);
-    // pkg.Func was already sent, should be bare ref.
+    // pkg.Func was already sent, should be bare ref keeping its session ID @0.
     expect(out2).toContain('@0  # previously transmitted');
-    // pkg.NewFunc is new, should be full declaration.
-    expect(out2).toContain('@1 fn pkg.NewFunc 0.60 rwr');
-    // Edges should still work.
-    expect(out2).toContain('@1<@0 calls');
+    // pkg.NewFunc is new; session IDs are stable/global, so it gets the next
+    // session ID @2 (pkg.Func=@0, pkg.Helper=@1 were assigned on the first call).
+    expect(out2).toContain('@2 fn pkg.NewFunc 0.60 rwr');
+    // Edges reference the stable session IDs.
+    expect(out2).toContain('@2<@0 calls');
   });
 
   it('records new symbols after encoding', () => {

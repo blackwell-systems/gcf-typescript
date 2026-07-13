@@ -40,6 +40,11 @@ export class Session {
     return this.symbols.size;
   }
 
+  /** Returns the next available session ID without consuming it. */
+  nextSessionID(): number {
+    return this.nextID;
+  }
+
   /** Clears the session state. */
   reset(): void {
     this.symbols.clear();
@@ -91,10 +96,22 @@ export function encodeWithSession(p: Payload, sess: Session | null): string {
   }
   lines.push(header);
 
-  // Build local ID mapping for this response.
+  // Build ID mapping using session-stable IDs.
+  // Known symbols keep their existing session ID; new symbols get the next
+  // available session IDs (assigned in payload order). This keeps IDs stable
+  // across calls so bare references resolve to the same symbol every time.
   const localIndex = new Map<string, number>();
-  for (let i = 0; i < p.symbols.length; i++) {
-    localIndex.set(p.symbols[i].qualifiedName, i);
+  for (const s of p.symbols) {
+    if (sess.transmitted(s.qualifiedName)) {
+      localIndex.set(s.qualifiedName, sess.getID(s.qualifiedName));
+    }
+  }
+  let nextNew = sess.nextSessionID();
+  for (const s of p.symbols) {
+    if (!sess.transmitted(s.qualifiedName)) {
+      localIndex.set(s.qualifiedName, nextNew);
+      nextNew++;
+    }
   }
 
   // Track which symbols are new for recording after encode.

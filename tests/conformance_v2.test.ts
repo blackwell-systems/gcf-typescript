@@ -5,8 +5,9 @@ import {
   GenericDeltaSession, fixedN, sizeGuard, type ReanchorPolicy,
   type GenericSet, type GenericDeltaPayload,
   StreamEncoder,
+  Session, encodeWithSession, encodeDelta,
 } from '../src/index.js';
-import type { Payload, Symbol, Edge } from '../src/index.js';
+import type { Payload, Symbol, Edge, DeltaPayload } from '../src/index.js';
 import { packRoot } from '../src/packroot.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -49,8 +50,15 @@ describe('Conformance v2', () => {
 
   for (const { relPath, data } of fixtures) {
     const op = data.operation;
-    if (op === 'session' || op === 'delta' || op === 'delta-verify') {
-      it.skip(`${relPath} (${op} not implemented)`, () => {});
+    // The graph delta wire decoder is not yet implemented, so verify-shaped
+    // fixtures are skipped with a reason: the explicit `delta-verify` operation,
+    // and delta fixtures whose `input` is a wire string (verify scenario, carries
+    // base_snapshot) rather than a delta payload object.
+    const isDeltaVerifyShaped =
+      op === 'delta-verify' ||
+      (op === 'delta' && (typeof data.input === 'string' || data.base_snapshot !== undefined));
+    if (isDeltaVerifyShaped) {
+      it.skip(`${relPath} (${op}): graph delta wire decoder not yet implemented`, () => {});
       continue;
     }
     if (data.inputBase64) {
@@ -226,8 +234,50 @@ describe('Conformance v2', () => {
           expect(chunks.join('')).toBe(data.expected);
           break;
         }
+        case 'session': {
+          // One session carries state across all calls; each call's encode must
+          // byte-match its expected wire, with prior symbols emitted as bare refs.
+          const session = new Session();
+          for (const call of data.calls) {
+            const p = toPayload(call.input);
+            const got = encodeWithSession(p, session);
+            expect(got).toBe(call.expected);
+          }
+          break;
+        }
+        case 'delta': {
+          // Encode path: input is a delta payload object (verify-shaped delta
+          // fixtures are skipped above before reaching the switch).
+          const inp = data.input;
+          const mkSym = (s: any): Symbol => ({
+            qualifiedName: s.qualifiedName,
+            kind: s.kind,
+            score: s.score,
+            provenance: s.provenance,
+            distance: s.distance,
+          });
+          const mkEdge = (e: any): Edge => ({
+            source: e.source,
+            target: e.target,
+            edgeType: e.edgeType,
+            status: e.status ?? undefined,
+          });
+          const d: DeltaPayload = {
+            tool: inp.tool,
+            baseRoot: inp.baseRoot,
+            newRoot: inp.newRoot,
+            removed: (inp.removed ?? []).map(mkSym),
+            added: (inp.added ?? []).map(mkSym),
+            removedEdges: (inp.removedEdges ?? []).map(mkEdge),
+            addedEdges: (inp.addedEdges ?? []).map(mkEdge),
+            deltaTokens: inp.deltaTokens,
+            fullTokens: inp.fullTokens,
+          };
+          expect(encodeDelta(d)).toBe(data.expected);
+          break;
+        }
         default:
-          throw new Error(`unknown operation: ${op}`);
+          throw new Error(`unhandled operation: ${op}`);
       }
     });
   }
