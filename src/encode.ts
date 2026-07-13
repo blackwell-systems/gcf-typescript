@@ -81,15 +81,34 @@ export function encode(p: Payload): string {
     }
   }
 
-  // Edges section.
+  // Edges section. Order edges by source ID then target ID (then edge type for
+  // parallel edges) so the wire is canonical regardless of the order edges were
+  // provided (SPEC 16.1). Edge reordering is decode-invariant (edges are a set)
+  // and does not affect pack_root, which sorts edge records independently.
   if (p.edges.length > 0) {
-    lines.push(`## edges [${validEdges}]`);
+    interface ResolvedEdge {
+      srcIdx: number;
+      tgtIdx: number;
+      edgeType: string;
+      status?: string;
+    }
+    const resolved: ResolvedEdge[] = [];
     for (const e of p.edges) {
       const srcIdx = symIndex.get(e.source);
       const tgtIdx = symIndex.get(e.target);
       if (srcIdx === undefined || tgtIdx === undefined) continue;
+      resolved.push({ srcIdx, tgtIdx, edgeType: e.edgeType, status: e.status });
+    }
+    // Stable sort (Array.prototype.sort is stable in modern Node).
+    resolved.sort((a, b) => {
+      if (a.srcIdx !== b.srcIdx) return a.srcIdx - b.srcIdx;
+      if (a.tgtIdx !== b.tgtIdx) return a.tgtIdx - b.tgtIdx;
+      return a.edgeType < b.edgeType ? -1 : a.edgeType > b.edgeType ? 1 : 0;
+    });
 
-      let line = `@${tgtIdx}<@${srcIdx} ${e.edgeType}`;
+    lines.push(`## edges [${validEdges}]`);
+    for (const e of resolved) {
+      let line = `@${e.tgtIdx}<@${e.srcIdx} ${e.edgeType}`;
       if (e.status && e.status !== 'unchanged') {
         line += ` ${e.status}`;
       }
