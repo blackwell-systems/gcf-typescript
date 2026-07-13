@@ -5,7 +5,7 @@ import {
   GenericDeltaSession, fixedN, sizeGuard, type ReanchorPolicy,
   type GenericSet, type GenericDeltaPayload,
   StreamEncoder,
-  Session, encodeWithSession, encodeDelta,
+  Session, encodeWithSession, encodeDelta, decodeDelta, verifyDelta,
 } from '../src/index.js';
 import type { Payload, Symbol, Edge, DeltaPayload } from '../src/index.js';
 import { packRoot } from '../src/packroot.js';
@@ -50,17 +50,6 @@ describe('Conformance v2', () => {
 
   for (const { relPath, data } of fixtures) {
     const op = data.operation;
-    // The graph delta wire decoder is not yet implemented, so verify-shaped
-    // fixtures are skipped with a reason: the explicit `delta-verify` operation,
-    // and delta fixtures whose `input` is a wire string (verify scenario, carries
-    // base_snapshot) rather than a delta payload object.
-    const isDeltaVerifyShaped =
-      op === 'delta-verify' ||
-      (op === 'delta' && (typeof data.input === 'string' || data.base_snapshot !== undefined));
-    if (isDeltaVerifyShaped) {
-      it.skip(`${relPath} (${op}): graph delta wire decoder not yet implemented`, () => {});
-      continue;
-    }
     if (data.inputBase64) {
       it.skip(`${relPath} (binary input)`, () => {});
       continue;
@@ -245,16 +234,59 @@ describe('Conformance v2', () => {
           }
           break;
         }
+        case 'delta-verify':
         case 'delta': {
-          // Encode path: input is a delta payload object (verify-shaped delta
-          // fixtures are skipped above before reaching the switch).
+          // Verify path: `delta-verify`, or a `delta` fixture whose `input` is a
+          // wire string / carries a base_snapshot. Decode the wire, apply against
+          // the base snapshot, and check the recomputed pack root.
+          if (op === 'delta-verify' || typeof data.input === 'string' || data.base_snapshot !== undefined) {
+            const mkSym = (s: any): Symbol => ({
+              qualifiedName: s.qualifiedName,
+              kind: s.kind,
+              score: s.score ?? 0,
+              provenance: s.provenance ?? '',
+              distance: s.distance ?? 0,
+            });
+            const mkEdge = (e: any): Edge => ({
+              source: e.source,
+              target: e.target,
+              edgeType: e.edgeType,
+              status: e.status ?? undefined,
+            });
+            const base = data.base_snapshot ?? { symbols: [], edges: [] };
+            const baseSymbols: Symbol[] = (base.symbols ?? []).map(mkSym);
+            const baseEdges: Edge[] = (base.edges ?? []).map(mkEdge);
+            const d = decodeDelta(data.input);
+            const doVerify = () =>
+              verifyDelta(
+                baseSymbols,
+                baseEdges,
+                d.removed,
+                d.added,
+                d.removedEdges,
+                d.addedEdges,
+                d.newRoot,
+              );
+            if (data.expectedError) {
+              expect(doVerify).toThrow(/root_mismatch/);
+            } else {
+              const res = doVerify();
+              const expSnap = data.expected_snapshot;
+              const expSymbols: Symbol[] = (expSnap.symbols ?? []).map(mkSym);
+              const expEdges: Edge[] = (expSnap.edges ?? []).map(mkEdge);
+              expect(packRoot(res.symbols, res.edges)).toBe(packRoot(expSymbols, expEdges));
+            }
+            break;
+          }
+
+          // Encode path: input is a delta payload object.
           const inp = data.input;
           const mkSym = (s: any): Symbol => ({
             qualifiedName: s.qualifiedName,
             kind: s.kind,
             score: s.score,
             provenance: s.provenance,
-            distance: s.distance,
+            distance: s.distance ?? 0,
           });
           const mkEdge = (e: any): Edge => ({
             source: e.source,

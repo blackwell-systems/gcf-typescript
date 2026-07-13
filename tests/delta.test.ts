@@ -213,6 +213,6 @@ describe('verifyDelta', () => {
         addedEdges,
         'sha256:0000000000000000000000000000000000000000000000000000000000000000',
       ),
-    ).toThrow('pack root mismatch');
+    ).toThrow('root_mismatch');
   });
 });
