@@ -171,7 +171,15 @@ function parseObjectBody(lines: string[], start: number, depth: number, out: Rec
       }
     }
 
-    i++;
+    // An object-body line that is not a `## ` section, a `key=value` field, or
+    // an inline array is not valid content and MUST NOT be silently skipped
+    // (that dropped data — a lossless round-trip hole). A pipe-delimited line is
+    // a stray positional inline body with no eligible `^` cell (SPEC 16.5,
+    // orphan_inline_attachment); any other unrecognized line is likewise rejected.
+    if (content.includes('|')) {
+      throw new Error(`orphan_inline_attachment: ${content}`);
+    }
+    throw new Error(`invalid_line: unexpected content in object body: ${JSON.stringify(content)}`);
   }
   return i - start;
 }
