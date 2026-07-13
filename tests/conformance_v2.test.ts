@@ -32,6 +32,15 @@ function loadFixtures(): Array<{ relPath: string; data: any }> {
 const fixtures = loadFixtures();
 
 describe('Conformance v2', () => {
+  // Floor assertion: a green run MUST have exercised the full shared suite. A
+  // present-but-short fixture set (mispathed or partial checkout) fails loudly rather
+  // than passing having verified almost nothing. A wholly-absent sibling checkout is
+  // skipped (CI clones gcf in a separate step that fails loudly if it cannot).
+  it('discovers the full shared fixture set (floor)', () => {
+    if (!fs.existsSync(fixtureDir)) return;
+    expect(fixtures.length).toBeGreaterThanOrEqual(150);
+  });
+
   if (fixtures.length === 0) {
     it.skip('fixtures not found', () => {});
     return;
