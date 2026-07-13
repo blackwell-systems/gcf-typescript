@@ -15,6 +15,7 @@
 
 ### Conformance and docs
 
+- Streaming graph trailer now emits `distance_N` group counts in pure group-header emission order (dropping a fixed `targets,related,extended` prefix), matching the other SDKs and deterministic per SPEC 16.1. Byte-identical for contract-conformant (ascending-distance) input; pinned by shared fixtures `streaming-v2/010`–`011`.
 - The conformance runner now executes the `graph-stream-encode` fixtures (streaming-encode parity, previously decode-only): fixture 004 (positional trailer) and 005 (labeled trailer).
 - README: corrected the streaming example trailer from the defunct `## _summary … sections=` to the real `##! summary … counts=`; README now leads with the project diagram.
 

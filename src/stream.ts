@@ -139,15 +139,13 @@ export class StreamEncoder {
    */
   close(): void {
     // Build sections as label:count pairs; positional form strips to values.
+    // One entry per non-empty distance group in group-header emission order
+    // (SPEC 8.4). The Map preserves insertion order, which is the order the group
+    // headers were emitted, so the trailer is deterministic and matches the section
+    // order (including distance_N groups) across all SDKs.
     const sections: string[] = [];
-    const groupOrder = ['targets', 'related', 'extended'];
-
-    for (const g of groupOrder) {
-      const c = this.groupCounts.get(g);
-      if (c && c > 0) sections.push(`${g}:${c}`);
-    }
     for (const [g, c] of this.groupCounts) {
-      if (!groupOrder.includes(g) && c > 0) sections.push(`${g}:${c}`);
+      if (c > 0) sections.push(`${g}:${c}`);
     }
     // The edge count is always the last counts entry, even when 0 (SPEC 8.4,
     // 8.4.1): it keeps the positional form unambiguous and anchors the labeled
