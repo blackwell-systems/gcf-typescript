@@ -11,7 +11,7 @@
 
 # gcf-typescript
 
-TypeScript implementation of [GCF](https://gcformat.com/) — the most token-efficient wire format for LLMs. A drop-in alternative to JSON and TOON for any structured data.
+TypeScript implementation of [GCF](https://gcformat.com/), the most token-efficient wire format for LLMs. A drop-in alternative to JSON and TOON for any structured data.
 
 <p align="center">
   <img src="assets/gcf-ts-diagram.png" alt="gcf-typescript" width="80%">
