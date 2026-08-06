@@ -276,11 +276,27 @@ describe('Graph round-trip', () => {
 
 type Shape = 'scalar' | Record<string, any>;
 
-function genShape(rng: () => number, depth: number, maxDepth: number): Shape {
+// A key function selects the keys the flatten generators emit. The default is
+// genBareKey (length >=1, never empty, never '>'), which keeps the original
+// flatten test's behavior byte-for-byte. The adversarial fuzz swaps in a key
+// function drawing from adversarialFlattenKeys (empty + every '>' arrangement)
+// so the empty-key / bare-'>' path (SPEC 7.4.6.1.3) is actually exercised.
+type KeyFn = (rng: () => number) => string;
+
+// Empty key + every arrangement of '>' mixed with plain keys, so a schema built
+// from these still commonly triggers the flatten path while forcing the encoder
+// to confront empty/'>' path segments that the decoder cannot invert.
+const adversarialFlattenKeys = ['', '>', '>>', 'a>b', 'a>', '>b', '>a>', 'a>>b', 'a', 'b', 'c', 'id', 'm', 'n'];
+
+function genAdversarialFlattenKey(rng: () => number): string {
+  return pick(rng, adversarialFlattenKeys);
+}
+
+function genShape(rng: () => number, depth: number, maxDepth: number, keyFn: KeyFn = genBareKey): Shape {
   if (depth >= maxDepth || rng() < 0.45) return 'scalar';
   const n = 1 + randInt(rng, 3);
   const shape: Record<string, any> = {};
-  for (let i = 0; i < n; i++) shape[genBareKey(rng)] = genShape(rng, depth + 1, maxDepth);
+  for (let i = 0; i < n; i++) shape[keyFn(rng)] = genShape(rng, depth + 1, maxDepth, keyFn);
   return Object.keys(shape).length ? shape : 'scalar';
 }
 
@@ -296,17 +312,23 @@ function materializeShape(rng: () => number, shape: Shape): any {
   return obj;
 }
 
-function genFlattenableArray(rng: () => number): any[] {
+function genFlattenableArray(rng: () => number, keyFn: KeyFn = genBareKey): any[] {
   const rows = 2 + randInt(rng, 6);
   const schema: Record<string, any> = { id: 'scalar' };
   let hasNested = false;
   const nFields = 1 + randInt(rng, 3);
   for (let i = 0; i < nFields; i++) {
-    const s = genShape(rng, 1, 3);
-    schema[genBareKey(rng)] = s;
+    const s = genShape(rng, 1, 3, keyFn);
+    schema[keyFn(rng)] = s;
     if (s !== 'scalar') hasNested = true;
   }
-  if (!hasNested) schema[genBareKey(rng)] = { [genBareKey(rng)]: { [genBareKey(rng)]: 'scalar' } };
+  // Force at least one nested field so the flatten path is reachable. Adversarial
+  // keys collide constantly (small alphabet), so only add the synthesized field
+  // when its top-level key is not already present, matching the gcf-go dedup.
+  if (!hasNested) {
+    const forced = keyFn(rng);
+    if (!(forced in schema)) schema[forced] = { [keyFn(rng)]: { [keyFn(rng)]: 'scalar' } };
+  }
   const arr: any[] = [];
   for (let i = 0; i < rows; i++) {
     const row: Record<string, any> = {};
@@ -340,6 +362,39 @@ describe('Generic property-based round-trip', () => {
           throw new Error(`iteration ${i} noFlatten=${noFlatten}: round-trip mismatch\n  input:   ${JSON.stringify(val)}\n  decoded: ${JSON.stringify(decoded)}\n  gcf: ${JSON.stringify(gcf)}`);
         }
       }
+    }
+  });
+
+  it(`${ITERATIONS} aligned nested arrays (adversarial empty / '>' keys)`, () => {
+    // Distinct seed from the bare-key flatten test above.
+    const rng = makeRng(1337);
+    let sawEmpty = false; // a top-level row key was the empty string ""
+    let sawGT = false; // a top-level row key contained '>'
+    for (let i = 0; i < ITERATIONS; i++) {
+      const val = genFlattenableArray(rng, genAdversarialFlattenKey);
+      for (const row of val) {
+        for (const k of Object.keys(row)) {
+          if (k === '') sawEmpty = true;
+          if (k.includes('>')) sawGT = true;
+        }
+      }
+      for (const noFlatten of [false, true]) {
+        const gcf = encodeGeneric(val, { noFlatten });
+        let decoded: any;
+        try {
+          decoded = decodeGeneric(gcf);
+        } catch (e: any) {
+          throw new Error(`iteration ${i} noFlatten=${noFlatten}: decode failed: ${e.message}\n  input: ${JSON.stringify(val)}\n  gcf: ${JSON.stringify(gcf)}`);
+        }
+        if (!structuralEqual(jsonNorm(val), jsonNorm(decoded))) {
+          throw new Error(`iteration ${i} noFlatten=${noFlatten}: round-trip mismatch\n  input:   ${JSON.stringify(val)}\n  decoded: ${JSON.stringify(decoded)}\n  gcf: ${JSON.stringify(gcf)}`);
+        }
+      }
+    }
+    // Liveness: the generator must actually have produced the adversarial keys
+    // this test exists to cover, else it proves nothing about the empty-key fix.
+    if (!sawEmpty || !sawGT) {
+      throw new Error(`generator liveness failure over ${ITERATIONS} iterations: sawEmpty=${sawEmpty} sawGT=${sawGT}`);
     }
   });
 
