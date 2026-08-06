@@ -165,7 +165,7 @@ function isUnsafeKey(k: string): boolean {
 
 function analyzeFlattenable(arr: unknown[], fieldName: string, parentPath: string): FlatLeaf[] | null {
   // Field names containing ">" cannot be flattened (would create ambiguous paths).
-  if (fieldName.includes('>')) return null;
+  if (fieldName === '' || fieldName.includes('>')) return null; // empty/'>' key -> ambiguous path (SPEC 7.4.6.1.3)
   let canonicalShape: Record<string, 'scalar' | 'nested'> | null = null;
 
   for (const item of arr) {
@@ -190,7 +190,7 @@ function analyzeFlattenable(arr: unknown[], fieldName: string, parentPath: strin
       // prototype-pollution keys outright (never flattened; round-trip whole).
       canonicalShape = Object.create(null) as Record<string, 'scalar' | 'nested'>;
       for (const k of keys) {
-        if (k.includes('>') || isUnsafeKey(k)) return null;
+        if (k === '' || k.includes('>') || isUnsafeKey(k)) return null; // empty/'>' -> ambiguous path (SPEC 7.4.6.1.3)
         const val = (v as Record<string, unknown>)[k];
         if (val !== null && val !== undefined && typeof val === 'object' && !Array.isArray(val)) {
           canonicalShape[k] = 'nested';
