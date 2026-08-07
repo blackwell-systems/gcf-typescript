@@ -1,5 +1,5 @@
 import type { StreamWriter } from './stream.js';
-import { formatScalar } from './scalar.js';
+import { formatScalar, formatKey } from './scalar.js';
 
 interface SectionCount {
   name: string;
@@ -31,6 +31,7 @@ export class GenericStreamEncoder {
   private readonly writer: StreamWriter;
   private sections: SectionCount[] = [];
   private current: ActiveArray | null = null;
+  private err: Error | null = null;
 
   constructor(writer: StreamWriter) {
     this.writer = writer;
@@ -38,10 +39,26 @@ export class GenericStreamEncoder {
 
   /** Start a tabular array section with deferred count [?]. */
   beginArray(name: string, fields: string[]): void {
+    if (this.err !== null) {
+      return;
+    }
     if (this.current !== null) {
       this.endArrayInternal();
     }
-    this.writer.write(`## ${name} [?]{${fields.join(',')}}\n`);
+
+    // A streaming tabular row has only flat columns; a field name containing ">"
+    // is a flattened path the stream cannot represent (SPEC 8.3, 7.4.6). Record
+    // the error and emit no section; it surfaces at close().
+    for (const f of fields) {
+      if (f.includes('>')) {
+        this.err = new Error(
+          `streaming field name ${JSON.stringify(f)} contains '>' (a flattened path is not representable in a streaming row)`,
+        );
+        return;
+      }
+    }
+
+    this.writer.write(`## ${formatKey(name)} [?]{${formatFieldDecl(fields)}}\n`);
     this.current = { name, fields, count: 0 };
   }
 
@@ -79,8 +96,12 @@ export class GenericStreamEncoder {
     this.writer.write(`${name}[${values.length}]: ${parts.join(',')}\n`);
   }
 
-  /** Emit the ##! summary trailer with final counts. Must be called after all data. */
+  /** Emit the ##! summary trailer with final counts. Must be called after all data.
+   *  Throws if a rejected field name (containing ">") was passed to beginArray. */
   close(): void {
+    if (this.err !== null) {
+      throw this.err;
+    }
     if (this.current !== null) {
       this.endArrayInternal();
     }
@@ -102,4 +123,12 @@ export class GenericStreamEncoder {
 
 function formatValue(v: unknown): string {
   return formatScalar(v, 0x7c); // '|' context
+}
+
+// formatFieldDecl quotes each field name per Section 2.4 (via formatKey), matching
+// the buffered tabular header. The streaming header previously joined field names
+// raw, so a name containing a delimiter or quote produced an invalid or ambiguous
+// header (SPEC 8.3).
+function formatFieldDecl(fields: string[]): string {
+  return fields.map(formatKey).join(',');
 }
