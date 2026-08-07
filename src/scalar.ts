@@ -11,6 +11,10 @@ const INLINE_ARRAY_RE = /\[[^\]]*\]\s*:/;
 export function needsQuote(s: string): boolean {
   if (s === '') return true;
   if (s === '-' || s === '~' || s === '^' || s === 'true' || s === 'false') return true;
+  // A string shaped like an inline-schema attachment marker (^{...}) would decode
+  // as an attachment, not a string, in a tabular cell; quote it (SPEC 2.4). The
+  // decoder recognizes exactly `^{` ... `}`, so match that set.
+  if (s.length >= 3 && s[0] === '^' && s[1] === '{' && s[s.length - 1] === '}') return true;
   if (JSON_NUMBER_RE.test(s)) return true;
   if (NUMERIC_LIKE_RE.test(s)) return true;
   if (s[0] === ' ' || s[s.length - 1] === ' ') return true;

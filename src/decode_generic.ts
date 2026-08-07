@@ -57,7 +57,7 @@ export function decodeGeneric(input: string): any {
     const trimmed = l.trimStart();
     if (trimmed.startsWith('# ')) continue;
     if (trimmed.startsWith('##! ')) { summaryLine = trimmed; continue; }
-    if (trimmed.startsWith('## ') && trimmed.includes('[?]')) deferredSectionCount++;
+    if (trimmed.startsWith('## ') && (trimmed.includes('[?]') || trimmed.includes('[?:]'))) deferredSectionCount++;
     contentLines.push(l);
   }
 
@@ -120,7 +120,7 @@ function parseObjectBody(lines: string[], start: number, depth: number, out: Rec
     // Array section.
     if (content.startsWith('## ')) {
       const hdr = content.slice(3);
-      const bi = hdr.indexOf(' [');
+      const bi = findHeaderBracketStart(hdr);
       if (bi >= 0) {
         const name = parseKeyFromHeader(hdr.slice(0, bi));
         checkDup(out, name);
@@ -202,6 +202,26 @@ function findKeyValueSplit(s: string): number {
   return eqIdx;
 }
 
+// findHeaderBracketStart locates the " [" that separates a section name from its
+// array/keyed count bracket, ignoring any " [" that falls inside a quoted name.
+// A section header whose name is a quoted string containing " [" (e.g. `## " [9]"`)
+// would otherwise be misread as a named-array header and reject a valid payload.
+// Returns the index of the separating space, or -1 for a plain object section.
+function findHeaderBracketStart(hdr: string): number {
+  let i = 0;
+  // Skip a leading quoted key so a " [" inside it is treated as data, not syntax.
+  if (hdr[0] === '"') {
+    i = 1;
+    while (i < hdr.length) {
+      if (hdr[i] === '\\') { i += 2; continue; }
+      if (hdr[i] === '"') { i++; break; }
+      i++;
+    }
+  }
+  const bi = hdr.indexOf(' [', i);
+  return bi;
+}
+
 function parseKeyFromHeader(s: string): string {
   s = s.trim();
   if (s.length >= 2 && s[0] === '"') return parseQuotedString(s);
@@ -236,10 +256,26 @@ function parseArrayFromHeader(lines: string[], headerLine: number, depth: number
   const closeIdx = bp.indexOf(']');
   if (closeIdx < 0) throw new Error('invalid_count');
 
-  const countStr = bp.slice(1, closeIdx);
+  let countStr = bp.slice(1, closeIdx);
   const afterBracket = bp.slice(closeIdx + 1);
+
+  // A `:` suffix on the count marks a keyed map (SPEC 7.2a): the decoder
+  // reconstructs a JSON object, not an array. `[N]` without the colon is
+  // an ordinary array (Section 7.4).
+  const keyed = countStr.endsWith(':');
+  if (keyed) {
+    countStr = countStr.slice(0, -1);
+    if (!afterBracket.startsWith('{')) throw new Error('keyed_map: missing field declaration');
+  }
+
   let count = -1;
   if (countStr !== '?') count = parseCount(countStr);
+
+  // A keyed map has at least one member; an empty object is encoded per
+  // Section 7.7, never as [0:] (SPEC 7.2a.4).
+  if (keyed && count === 0) {
+    throw new Error('keyed_map: zero count [0:] is invalid (an empty object uses Section 7.7)');
+  }
 
   if (count === 0 && !afterBracket.startsWith('{') && !afterBracket.startsWith(':')) {
     return [[], 1];
@@ -264,6 +300,7 @@ function parseArrayFromHeader(lines: string[], headerLine: number, depth: number
     const fields = splitFieldDecl(afterBracket.slice(0, braceEnd + 1));
     const [rows, consumed] = parseTabularBody(lines, headerLine + 1, depth, fields, count);
     if (count >= 0 && rows.length !== count) throw new Error(`count_mismatch: declared ${count}, got ${rows.length}`);
+    if (keyed) return [keyedRowsToMap(rows, fields), consumed + 1];
     return [rows, consumed + 1];
   }
 
@@ -271,6 +308,36 @@ function parseArrayFromHeader(lines: string[], headerLine: number, depth: number
   const [items, consumed] = parseExpandedBody(lines, headerLine + 1, depth);
   if (count >= 0 && items.length !== count) throw new Error(`count_mismatch: declared ${count}, got ${items.length}`);
   return [items, consumed + 1];
+}
+
+// keyedRowsToMap reconstructs the map from decoded keyed-table rows (SPEC 7.2a.4):
+// the first declared field is the member key; the remaining fields form the value
+// object. The key-column label is discarded from every value object. Duplicate
+// member keys are rejected.
+function keyedRowsToMap(rows: any[], fields: string[]): Record<string, any> {
+  // A keyed header MUST declare at least two fields: the key column plus at
+  // least one value field (SPEC 7.2a.2).
+  if (fields.length < 2) throw new Error('keyed_map: header must declare at least two fields');
+  const keyLabel = fields[0];
+  const out: Record<string, any> = {};
+  for (const row of rows) {
+    // parseTabularBody omits an absent (~) cell; a keyed row always carries the
+    // key cell (a scalar per SPEC 7.2a.3), so read it directly.
+    const kv = Object.prototype.hasOwnProperty.call(row, keyLabel) ? row[keyLabel] : undefined;
+    const ks = typeof kv === 'string' ? kv : String(kv);
+    // safeAssign writes even a "__proto__" member as an own data property, so a
+    // plain own-property check catches duplicates for every key without ever
+    // touching the prototype chain.
+    if (Object.prototype.hasOwnProperty.call(out, ks)) throw new Error(`keyed_map: duplicate member key ${ks}`);
+    // Strip the key-column label so it is not emitted as a value-object member.
+    const value: Record<string, any> = {};
+    for (const f of Object.keys(row)) {
+      if (f === keyLabel) continue;
+      safeAssign(value, f, row[f]);
+    }
+    safeAssign(out, ks, value);
+  }
+  return out;
 }
 
 function findClosingBrace(s: string): number {
@@ -638,11 +705,15 @@ function parseAttachment(lines: string[], lineIdx: number, rest: string, depth: 
     if (closeBracket < 0) throw new Error('invalid_count: missing ]');
     const afterClose = afterName.slice(closeBracket + 1);
 
-    // [N]{fields}: has its own schema.
+    // [N]{fields} or [N:]{key,fields}: has its own schema.
     if (afterClose.startsWith('{')) {
+      // A keyed-map attachment ([N:]) reconstructs an object, not an array, and
+      // MUST NOT establish a shared array schema (which is an array-only reuse
+      // mechanism, SPEC 7.4.5.3); leave parsedFields null for the keyed form.
+      const isKeyed = afterName.slice(1, closeBracket).endsWith(':');
       const endBrace = findClosingBrace(afterClose);
       let parsedFields: string[] | null = null;
-      if (endBrace >= 0) {
+      if (!isKeyed && endBrace >= 0) {
         try { parsedFields = splitFieldDecl(afterClose.slice(0, endBrace + 1)); } catch {}
       }
       const [arr, consumed] = parseArrayFromHeader(lines, lineIdx, depth, afterName);
@@ -774,7 +845,7 @@ function validateSummaryCounts(summaryLine: string, deferredCount: number, conte
   let currentCount = 0;
   for (const l of contentLines) {
     const trimmed = l.trimStart();
-    if (trimmed.startsWith('## ') && trimmed.includes('[?]')) {
+    if (trimmed.startsWith('## ') && (trimmed.includes('[?]') || trimmed.includes('[?:]'))) {
       if (inDeferred) actualCounts.push(currentCount);
       inDeferred = true;
       currentCount = 0;

@@ -25,7 +25,11 @@ export function encodeGeneric(data: unknown, opts?: GenericOptions): string {
 function encodeRootValue(v: unknown, opts?: GenericOptions): string {
   if (v === null || v === undefined) return '=-\n';
   if (Array.isArray(v)) return encodeRootArray(v, opts);
-  if (typeof v === 'object') return encodeObject(v as Record<string, unknown>, 0, opts);
+  if (typeof v === 'object') {
+    const km = keyedMapEligible(v as Record<string, unknown>);
+    if (km) return encodeKeyedMap('', false, km, 0, opts);
+    return encodeObject(v as Record<string, unknown>, 0, opts);
+  }
   return `=${formatScalar(v, 0)}\n`;
 }
 
@@ -38,6 +42,11 @@ function encodeObject(obj: Record<string, unknown>, depth: number, opts?: Generi
     if (Array.isArray(value)) {
       out += encodeNamedArray(fk, value, depth, opts);
     } else if (typeof value === 'object' && value !== null) {
+      const km = keyedMapEligible(value as Record<string, unknown>);
+      if (km) {
+        out += encodeKeyedMap(key, true, km, depth, opts);
+        continue;
+      }
       out += `${prefix}## ${fk}\n`;
       out += encodeObject(value as Record<string, unknown>, depth + 1, opts);
     } else {
@@ -45,6 +54,83 @@ function encodeObject(obj: Record<string, unknown>, depth: number, opts?: Generi
     }
   }
   return out;
+}
+
+// ── Keyed map encoding (tabular, SPEC 7.2a) ───────────────────────────────
+
+interface KeyedMap {
+  keys: string[];         // ordered member keys
+  values: unknown[];      // corresponding member value objects
+  valueFields: string[];  // ordered value-field union
+  keyLabel: string;       // key-column label ("key", or "_key" on collision)
+}
+
+// keyedMapEligible reports whether an object is a keyed map of objects that
+// should render as a keyed table `## [N:]{key,...}` (SPEC 7.2a.1). It returns
+// the ordered member keys, the value objects, the value-field union, and the
+// key-column label, or null when the object is not eligible.
+function keyedMapEligible(m: Record<string, unknown>): KeyedMap | null {
+  const keys = Object.keys(m);
+
+  // A keyed map requires at least two members: the form factors the shared
+  // value fields into one header, which only pays off across multiple members.
+  // A single-member map yields a one-row table the same size as a section, so
+  // keying it would change canonical output for every nested single-member
+  // object (e.g. {"data":{...}} wrappers) with no benefit (SPEC 7.2a.1).
+  if (keys.length < 2) return null;
+
+  const values: unknown[] = [];
+  const valueFields: string[] = [];
+  const seen = new Set<string>();
+  for (const k of keys) {
+    const v = m[k];
+    // Every value must be a non-array object; build the ordered field union.
+    if (v === null || v === undefined || typeof v !== 'object' || Array.isArray(v)) return null;
+    values.push(v);
+    for (const f of Object.keys(v as Record<string, unknown>)) {
+      if (!seen.has(f)) { seen.add(f); valueFields.push(f); }
+    }
+  }
+  // All-empty value objects have an empty field union and are not eligible.
+  if (valueFields.length === 0) return null;
+
+  // A keyed header needs at least one value field that can be a tabular column.
+  // A field name containing ">" cannot be a column (SPEC 7.4.6.1.4); if every
+  // value field contains ">", the keyed form would have only the key column,
+  // which is invalid. Such a map uses Section 7.2 section encoding instead.
+  if (!valueFields.some(f => !f.includes('>'))) return null;
+
+  // Key-column label: "key", made unique by prepending "_" on collision.
+  let keyLabel = 'key';
+  while (valueFields.includes(keyLabel)) keyLabel = '_' + keyLabel;
+
+  return { keys, values, valueFields, keyLabel };
+}
+
+// encodeKeyedMap emits a keyed table for a map of objects. named distinguishes
+// an anonymous root keyed map (`## `) from a named member whose name may itself
+// be the empty string (`## ""`), which formatKey quotes so it round-trips as a
+// distinct level rather than collapsing into the anonymous root form.
+function encodeKeyedMap(name: string, named: boolean, km: KeyedMap, depth: number, opts?: GenericOptions): string {
+  const prefix = indent(depth);
+  const headerPrefix = named ? `${prefix}## ${formatKey(name)} ` : `${prefix}## `;
+  return encodeKeyedMapWithPrefix(headerPrefix, km, depth, opts);
+}
+
+// encodeKeyedMapWithPrefix emits `<headerPrefix>[N:]{...}` and the keyed rows,
+// reusing encodeTabular. It augments each value object with the key column and
+// routes through the tabular encoder with the keyed bracket, so nested-value
+// handling (flatten/inline/attachment/null/absent) is inherited unchanged.
+function encodeKeyedMapWithPrefix(headerPrefix: string, km: KeyedMap, depth: number, opts?: GenericOptions): string {
+  const fields = [km.keyLabel, ...km.valueFields];
+  const arr = km.keys.map((k, i) => {
+    // Key column first so it decodes as cell 0; value fields follow in union order.
+    const aug: Record<string, unknown> = { [km.keyLabel]: k };
+    const vo = km.values[i] as Record<string, unknown>;
+    for (const kk of Object.keys(vo)) aug[kk] = vo[kk];
+    return aug;
+  });
+  return encodeTabular(headerPrefix, arr, fields, depth, opts, true);
 }
 
 function encodeRootArray(arr: unknown[], opts?: GenericOptions): string {
@@ -272,7 +358,7 @@ function resolveKeyChain(item: unknown, keys: string[]): { value: unknown; exist
 
 // ── End flattening helpers ───────────────────────────────────────────────
 
-function encodeTabular(headerPrefix: string, arr: unknown[], fields: string[], depth: number, opts?: GenericOptions): string {
+function encodeTabular(headerPrefix: string, arr: unknown[], fields: string[], depth: number, opts?: GenericOptions, keyed = false): string {
   const prefix = indent(depth);
 
   // Phase 0: Analyze fields for flattening.
@@ -329,7 +415,8 @@ function encodeTabular(headerPrefix: string, arr: unknown[], fields: string[], d
   }
 
   const headerFields = columns.map(c => c.headerName);
-  let out = `${headerPrefix}[${arr.length}]{${headerFields.join(',')}}\n`;
+  const br = keyed ? ':]' : ']';
+  let out = `${headerPrefix}[${arr.length}${br}{${headerFields.join(',')}}\n`;
 
   for (let i = 0; i < arr.length; i++) {
     const obj = arr[i] as Record<string, unknown>;
@@ -420,8 +507,13 @@ function encodeTabular(headerPrefix: string, arr: unknown[], fields: string[], d
           out += encodeAttachmentArray(prefix, fk, att.value as unknown[], depth + 2, opts);
         }
       } else if (typeof att.value === 'object' && att.value !== null) {
-        out += `${prefix}.${fk} {}\n`;
-        out += encodeObject(att.value as Record<string, unknown>, depth + 2, opts);
+        const km = keyedMapEligible(att.value as Record<string, unknown>);
+        if (km) {
+          out += encodeKeyedMapWithPrefix(`${prefix}.${fk} `, km, depth + 2, opts);
+        } else {
+          out += `${prefix}.${fk} {}\n`;
+          out += encodeObject(att.value as Record<string, unknown>, depth + 2, opts);
+        }
       } else {
         // Scalar attachment (e.g. field names containing ">").
         if (att.value === null || att.value === undefined) {
@@ -481,6 +573,11 @@ function encodeExpanded(headerPrefix: string, arr: unknown[], depth: number, opt
     if (Array.isArray(item)) {
       out += encodeExpandedArrayItem(prefix, i, item, depth, opts);
     } else if (typeof item === 'object' && item !== null) {
+      const km = keyedMapEligible(item as Record<string, unknown>);
+      if (km) {
+        out += encodeKeyedMapWithPrefix(`${prefix}@${i} `, km, depth + 1, opts);
+        continue;
+      }
       out += `${prefix}@${i} {}\n`;
       out += encodeObject(item as Record<string, unknown>, depth + 1, opts);
     } else {

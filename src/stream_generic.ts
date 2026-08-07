@@ -63,6 +63,33 @@ export class GenericStreamEncoder {
     this.current = { name, fields, count: 0 };
   }
 
+  /** Start a keyed-map section with deferred count [?:] (SPEC 7.2a).
+   *  keyLabel is the key column; valueFields are the value-object fields. Each
+   *  writeRow value slice is [keyValue, ...valueFields]. */
+  beginKeyedMap(name: string, keyLabel: string, valueFields: string[]): void {
+    if (this.err !== null) {
+      return;
+    }
+    if (this.current !== null) {
+      this.endArrayInternal();
+    }
+
+    // A streaming value field name containing ">" is a flattened path a stream
+    // cannot represent (SPEC 8.3, 7.4.6). Record the error; it surfaces at close().
+    for (const f of valueFields) {
+      if (f.includes('>')) {
+        this.err = new Error(
+          `streaming field name ${JSON.stringify(f)} contains '>' (a flattened path is not representable in a streaming row)`,
+        );
+        return;
+      }
+    }
+
+    const fields = [keyLabel, ...valueFields];
+    this.writer.write(`## ${formatKey(name)} [?:]{${formatFieldDecl(fields)}}\n`);
+    this.current = { name, fields, count: 0 };
+  }
+
   /** Emit a single pipe-separated row immediately. */
   writeRow(values: unknown[]): void {
     if (this.current === null) {
