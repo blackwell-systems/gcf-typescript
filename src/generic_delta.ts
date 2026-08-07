@@ -372,14 +372,22 @@ export function decodeGenericFull(text: string): { set: GenericSet; packRoot: st
   let i = 1;
   while (i < lines.length) {
     const line = lines[i];
-    if (!line.startsWith('## ')) { i++; continue; }
+    if (!line.startsWith('## ')) {
+      // Only blank lines, comments, and the ##! summary trailer are valid
+      // outside a section; any other line is a surplus row past a declared
+      // section count (Section 13).
+      if (line === '' || line.startsWith('# ') || line.startsWith('##! ')) { i++; continue; }
+      throw new Error(`count_mismatch: unexpected content after declared section rows: ${JSON.stringify(line)}`);
+    }
     const { name, count, fields, keyField } = parseSectionHeader(line.slice(3));
     set.name = name;
     set.fields = fields;
     if (!set.key) set.key = keyField;
     i++;
     for (let j = 0; j < count; j++) {
-      if (i >= lines.length) throw new Error('delta_invalid: fewer rows than declared count');
+      if (i >= lines.length || lines[i].startsWith('## ')) {
+        throw new Error(`count_mismatch: declared ${count} rows, got ${j}`);
+      }
       set.rows.push(parseRow(lines[i], fields));
       i++;
     }
@@ -413,7 +421,13 @@ export function decodeGenericDelta(text: string): GenericDeltaPayload {
   let fieldsSet = false;
   while (i < lines.length) {
     const line = lines[i];
-    if (!line.startsWith('## ')) { i++; continue; }
+    if (!line.startsWith('## ')) {
+      // Only blank lines, comments, and the ##! summary trailer are valid
+      // outside a section; any other line is a surplus row past a declared
+      // section count (Section 13).
+      if (line === '' || line.startsWith('# ') || line.startsWith('##! ')) { i++; continue; }
+      throw new Error(`count_mismatch: unexpected content after declared section rows: ${JSON.stringify(line)}`);
+    }
     const { name, count, fields, keyField } = parseSectionHeader(line.slice(3));
     if (!d.key && keyField) d.key = keyField;
     if (!fieldsSet && (name === 'added' || name === 'changed')) {
@@ -424,7 +438,9 @@ export function decodeGenericDelta(text: string): GenericDeltaPayload {
     if (name === 'added' || name === 'changed') {
       const rows: Array<Record<string, unknown>> = [];
       for (let j = 0; j < count; j++) {
-        if (i >= lines.length) throw new Error(`delta_invalid: fewer rows than declared count in ## ${name}`);
+        if (i >= lines.length || lines[i].startsWith('## ')) {
+          throw new Error(`count_mismatch: declared ${count} rows in ## ${name}, got ${j}`);
+        }
         rows.push(parseRow(lines[i], fields));
         i++;
       }
@@ -432,7 +448,9 @@ export function decodeGenericDelta(text: string): GenericDeltaPayload {
       else d.changed = rows;
     } else if (name === 'removed') {
       for (let j = 0; j < count; j++) {
-        if (i >= lines.length) throw new Error('delta_invalid: fewer identities than declared count in ## removed');
+        if (i >= lines.length || lines[i].startsWith('## ')) {
+          throw new Error(`count_mismatch: declared ${count} identities in ## removed, got ${j}`);
+        }
         d.removed.push(parseScalar(lines[i], true));
         i++;
       }

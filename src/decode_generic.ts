@@ -92,7 +92,15 @@ export function decodeGeneric(input: string): any {
 
   // Root array.
   if (first.startsWith('## [')) {
-    const [arr] = parseArrayFromHeader(contentLines, 0, 0, first.slice(3));
+    const [arr, consumed] = parseArrayFromHeader(contentLines, 0, 0, first.slice(3));
+    // A root array or keyed map spans the whole document, so any structural line
+    // past the consumed rows is a surplus item, not sibling content. The row loop
+    // stops at the declared count, so the count assert only catches the deficit
+    // case; surplus is caught here (SPEC Section 13: a mismatch, fewer OR more
+    // items than declared, is an error).
+    if (consumed < contentLines.length) {
+      throw new Error('count_mismatch: declared count is fewer than the rows present');
+    }
     return arr;
   }
 

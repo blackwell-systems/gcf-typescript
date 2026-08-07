@@ -37,6 +37,8 @@ export function decode(input: string): Payload {
   const symByID = new Map<number, Symbol>();
   let currentDistance = 0;
   let inEdges = false;
+  let declaredEdges = -1;
+  let edgesDeclared = false;
 
   for (let i = 1; i < lines.length; i++) {
     let line = lines[i].replace(/\r$/, '');
@@ -48,10 +50,22 @@ export function decode(input: string): Payload {
     // Group header.
     if (line.startsWith('## ')) {
       let group = line.slice(3);
-      // Strip bracket suffix: "edges [200]" -> "edges"
+      // Strip bracket suffix: "edges [200]" -> "edges", capturing the declared
+      // count so it can be enforced per Section 13.
+      let declaredCount = -1;
       const bracketIdx = group.indexOf(' [');
       if (bracketIdx >= 0) {
+        const bracket = group.slice(bracketIdx + 2);
         group = group.slice(0, bracketIdx);
+        const end = bracket.indexOf(']');
+        if (end >= 0) {
+          const cntStr = bracket.slice(0, end);
+          if (cntStr !== '?') { // "[?]" is a streaming deferred count (Section 8)
+            const n = parseInt(cntStr, 10);
+            if (isNaN(n)) throw new Error(`count_mismatch: invalid section count "${cntStr}"`);
+            declaredCount = n;
+          }
+        }
       }
 
       if (isDelta && !validDeltaSections.has(group)) {
@@ -59,6 +73,10 @@ export function decode(input: string): Payload {
       }
 
       inEdges = group === 'edges';
+      if (inEdges && declaredCount >= 0) {
+        declaredEdges = declaredCount;
+        edgesDeclared = true;
+      }
       if (!inEdges) {
         switch (group) {
           case 'targets':
@@ -96,6 +114,12 @@ export function decode(input: string): Payload {
       symbols.push(symbol);
       symByID.set(id, symbol);
     }
+  }
+
+  // Section 13: a declared [N] section count MUST match the actual item count.
+  // The graph edges section is the graph profile's only [N]-bearing section.
+  if (edgesDeclared && p.edges.length !== declaredEdges) {
+    throw new Error(`count_mismatch: declared ${declaredEdges} edges, got ${p.edges.length}`);
   }
 
   p.symbols = symbols;
