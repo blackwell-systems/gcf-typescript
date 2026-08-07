@@ -94,6 +94,14 @@ function randMemberKeys(rng: () => number, count: number): string[] {
 // field union, so a member missing an early field but carrying a later one can
 // decode with its own keys in union order rather than source order; SPEC 1.1
 // preserves key membership and values, which is what we assert.
+// decodeGeneric returns a Map for every JSON object (to preserve key order on
+// re-encode); read either a Map or a plain object as a keyed collection so the
+// decoded Map compares equal to the plain-object expectation.
+function objEntries(v: object): Array<[string, unknown]> {
+  if (v instanceof Map) return Array.from(v.entries());
+  return Object.entries(v as Record<string, unknown>);
+}
+
 function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return a === b;
@@ -104,10 +112,10 @@ function deepEqual(a: unknown, b: unknown): boolean {
     if (ar.length !== br.length) return false;
     return ar.every((v, i) => deepEqual(v, br[i]));
   }
-  const ao = a as Record<string, unknown>, bo = b as Record<string, unknown>;
-  const ak = Object.keys(ao);
-  if (ak.length !== Object.keys(bo).length) return false;
-  return ak.every(k => Object.prototype.hasOwnProperty.call(bo, k) && deepEqual(ao[k], bo[k]));
+  const ae = objEntries(a), be = objEntries(b);
+  if (ae.length !== be.length) return false;
+  const bm = new Map(be);
+  return ae.every(([k, v]) => bm.has(k) && deepEqual(v, bm.get(k)));
 }
 
 describe('keyed-map fuzz', () => {

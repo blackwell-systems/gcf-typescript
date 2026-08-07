@@ -9,6 +9,25 @@ import { GenericStreamEncoder, decodeGeneric } from '../src/index.js';
 
 const ITERATIONS = parseInt(process.env.GCF_ITERATIONS ?? '200000', 10);
 
+// decodeGeneric returns a Map for every JSON object (to preserve key order,
+// including integer-like keys, on re-encode). Collapse Maps to plain objects so
+// the decoded rows compare (via JSON.stringify) against the plain-object
+// expectations built from the input rows.
+function norm(v: any): any {
+  if (v instanceof Map) {
+    const o: Record<string, any> = {};
+    for (const [k, val] of v) o[k] = norm(val);
+    return o;
+  }
+  if (Array.isArray(v)) return v.map(norm);
+  if (v && typeof v === 'object') {
+    const o: Record<string, any> = {};
+    for (const k of Object.keys(v)) o[k] = norm(v[k]);
+    return o;
+  }
+  return v;
+}
+
 // Seeded PRNG (xorshift32) for reproducibility.
 function makeRng(seed: number) {
   let s = seed;
@@ -119,7 +138,7 @@ describe('GenericStreamEncoder field-declaration quoting fuzz', () => {
         return obj;
       });
 
-      const actual = decoded[sectionName];
+      const actual = norm(decoded instanceof Map ? decoded.get(sectionName) : decoded[sectionName]);
       if (JSON.stringify(actual) !== JSON.stringify(expected)) {
         if (failures === 0) {
           firstFailure =

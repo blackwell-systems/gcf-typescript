@@ -2,6 +2,28 @@ import { describe, it, expect } from 'vitest';
 import { encodeGeneric } from '../src/generic.js';
 import { decodeGeneric } from '../src/decode_generic.js';
 
+// decodeGeneric returns a Map for every JSON object (to preserve key order on
+// re-encode). Collapse Maps to plain objects for comparison, writing a literal
+// "__proto__" key as an own data property (never through the prototype), so the
+// normalized value matches JSON.parse's own-"__proto__" semantics without ever
+// polluting Object.prototype. Map.set itself cannot pollute the prototype, which
+// is why the decoder is safe regardless.
+function normDecoded(v: any): any {
+  if (v instanceof Map) {
+    const o: Record<string, any> = {};
+    for (const [k, val] of v) {
+      if (k === '__proto__') {
+        Object.defineProperty(o, k, { value: normDecoded(val), writable: true, enumerable: true, configurable: true });
+      } else {
+        o[k] = normDecoded(val);
+      }
+    }
+    return o;
+  }
+  if (Array.isArray(v)) return v.map(normDecoded);
+  return v;
+}
+
 // Prototype-pollution is a JS/TS-specific concern (map-based SDKs are unaffected).
 // The generic encoder/decoder must never mutate Object.prototype and must treat
 // keys shadowing Object.prototype members as ordinary data.
@@ -12,14 +34,14 @@ describe('generic profile — prototype-pollution safety', () => {
       JSON.parse('{"id":2,"meta":{"__proto__":{"polluted":true},"real":2}}'),
     ];
     const decoded = decodeGeneric(encodeGeneric(input));
-    expect(decoded).toEqual(input);
+    expect(normDecoded(decoded)).toEqual(input);
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
   });
 
   it('round-trips a top-level __proto__ column without polluting', () => {
     const input = [JSON.parse('{"id":1,"__proto__":"x"}'), JSON.parse('{"id":2,"__proto__":"y"}')];
     const decoded = decodeGeneric(encodeGeneric(input));
-    expect(decoded).toEqual(input);
+    expect(normDecoded(decoded)).toEqual(input);
     expect(({} as Record<string, unknown>).x).toBeUndefined();
   });
 
@@ -35,6 +57,6 @@ describe('generic profile — prototype-pollution safety', () => {
       { id: 2, toString: 't2', constructor: 'c2', valueOf: 2 },
     ];
     const decoded = decodeGeneric(encodeGeneric(input));
-    expect(decoded).toEqual(input);
+    expect(normDecoded(decoded)).toEqual(input);
   });
 });

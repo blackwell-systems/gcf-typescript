@@ -2,6 +2,24 @@ import { describe, it, expect } from 'vitest';
 import { encodeGeneric } from '../src/generic.js';
 import { decodeGeneric } from '../src/decode_generic.js';
 
+// decodeGeneric returns a Map for every JSON object (to preserve key order,
+// including integer-like keys, on re-encode). Collapse Maps to plain objects
+// for order-insensitive structural comparison against the plain-object inputs.
+function norm(v: any): any {
+  if (v instanceof Map) {
+    const o: Record<string, any> = {};
+    for (const [k, val] of v) o[k] = norm(val);
+    return o;
+  }
+  if (Array.isArray(v)) return v.map(norm);
+  if (v && typeof v === 'object') {
+    const o: Record<string, any> = {};
+    for (const k of Object.keys(v)) o[k] = norm(v[k]);
+    return o;
+  }
+  return v;
+}
+
 describe('encodeGeneric', () => {
   it('encodes a flat tabular array of employees', () => {
     const data = {
@@ -141,8 +159,8 @@ describe('encodeGeneric', () => {
     expect(noFlatten).toContain('.customer');
 
     // Both round-trip.
-    expect(decodeGeneric(withFlatten)).toEqual(data);
-    expect(decodeGeneric(noFlatten)).toEqual(data);
+    expect(norm(decodeGeneric(withFlatten))).toEqual(data);
+    expect(norm(decodeGeneric(noFlatten))).toEqual(data);
   });
 
   describe('> in field names', () => {
@@ -151,7 +169,7 @@ describe('encodeGeneric', () => {
         for (const noFlatten of [false, true]) {
           const encoded = encodeGeneric(data, { noFlatten });
           const decoded = decodeGeneric(encoded);
-          expect(decoded).toEqual(data);
+          expect(norm(decoded)).toEqual(data);
         }
       });
     }

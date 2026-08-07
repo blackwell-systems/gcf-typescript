@@ -1,8 +1,22 @@
 import { describe, it, expect } from 'vitest';
 import { encodeGeneric, decodeGeneric } from '../src/index.js';
 
+// decodeGeneric returns a Map for every JSON object (to preserve key order,
+// including integer-like keys, on re-encode). Collapse Maps to plain objects
+// before structural (order-insensitive) comparison.
 function jsonNorm(v: any): any {
-  return JSON.parse(JSON.stringify(v));
+  if (v instanceof Map) {
+    const o: Record<string, any> = {};
+    for (const [k, val] of v) o[k] = jsonNorm(val);
+    return o;
+  }
+  if (Array.isArray(v)) return v.map(jsonNorm);
+  if (v && typeof v === 'object') {
+    const o: Record<string, any> = {};
+    for (const k of Object.keys(v)) o[k] = jsonNorm(v[k]);
+    return o;
+  }
+  return v;
 }
 
 // Seeded PRNG (mulberry32)

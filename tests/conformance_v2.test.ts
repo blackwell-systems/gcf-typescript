@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  encode, encodeGeneric, decodeGeneric,
+  encode, decode, encodeGeneric, decodeGeneric,
   genericPackRoot, encodeGenericDelta, decodeGenericDelta, verifyGenericDelta,
   GenericDeltaSession, fixedN, sizeGuard, type ReanchorPolicy,
   type GenericSet, type GenericDeltaPayload,
@@ -85,6 +85,10 @@ describe('Conformance v2', () => {
             const p = toPayload(data.input);
             const got = encode(p);
             expect(got).toBe(data.expected);
+            // Re-encode idempotence: encode(decode(got)) === got. Confirms the graph
+            // decoder reconstructs the payload without dropping or reordering fields
+            // (SPEC 52, 931).
+            expect(encode(decode(got))).toBe(got);
           } else {
             const input = orderedInput(raw);
             const got = encodeGeneric(input);
@@ -145,7 +149,12 @@ describe('Conformance v2', () => {
             added: inp.added ?? [], changed: inp.changed ?? [], removed: inp.removed ?? [],
             deltaTokens: inp.deltaTokens, fullTokens: inp.fullTokens,
           };
-          expect(encodeGenericDelta(d)).toBe(data.expected);
+          const gotDelta = encodeGenericDelta(d);
+          expect(gotDelta).toBe(data.expected);
+          // Re-encode idempotence: encodeGenericDelta(decodeGenericDelta(got)) === got,
+          // ignoring the derived savings= header stat (see stripDeltaSavings). Confirms
+          // the delta decoder preserves fields and their order (SPEC 52, 931).
+          expect(stripDeltaSavings(encodeGenericDelta(decodeGenericDelta(gotDelta)))).toBe(stripDeltaSavings(gotDelta));
           break;
         }
         case 'generic-delta-verify': {
@@ -374,6 +383,18 @@ function subsetMatch(expected: any, got: any): boolean {
   }
   if (typeof got !== 'object' || got === null) return false;
   return Object.keys(expected).every(k => subsetMatch(expected[k], got[k]));
+}
+
+// Remove the derived ` savings=...` header stat so re-encode idempotence can be
+// checked on the parts of the wire the payload actually carries. The stat is computed
+// from the original set sizes at encode time and is not on the wire, so a
+// decode/re-encode legitimately cannot reconstruct it.
+function stripDeltaSavings(s: string): string {
+  const idx = s.indexOf(' savings=');
+  if (idx < 0) return s;
+  let end = idx + ' savings='.length;
+  while (end < s.length && s[end] !== ' ' && s[end] !== '\n') end++;
+  return s.slice(0, idx) + s.slice(end);
 }
 
 function toPayload(input: any): Payload {
