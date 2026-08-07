@@ -8,6 +8,7 @@ import { encode } from './encode.js';
 import { decode } from './decode.js';
 import { encodeGeneric } from './generic.js';
 import { decodeGeneric } from './decode_generic.js';
+import { parseJSONOrdered } from './json_ordered.js';
 import type { Payload, Symbol, Edge } from './types.js';
 
 const USAGE = `gcf - token-optimized wire format for LLM tool responses
@@ -121,7 +122,7 @@ switch (cmd) {
     doDecode(readInput(args.slice(1)));
     break;
   case 'encode-generic':
-    process.stdout.write(encodeGeneric(JSON.parse(readInput(args.slice(1)))));
+    process.stdout.write(encodeGeneric(parseJSONOrdered(readInput(args.slice(1)))));
     break;
   case 'decode-generic':
     console.log(JSON.stringify(decodeGeneric(readInput(args.slice(1))), null, 2));

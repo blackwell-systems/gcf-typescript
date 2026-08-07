@@ -7,6 +7,9 @@ export { encodeDelta, decodeDelta, verifyDelta } from './delta.js';
 // packRoot is Node-only (uses crypto.createHash). Import directly: import { packRoot } from '@blackwell-systems/gcf/dist/packroot.js'
 export { encodeGeneric, type GenericOptions } from './generic.js';
 export { decodeGeneric } from './decode_generic.js';
+// Order-preserving JSON parser: parse JSON text before encodeGeneric to keep
+// first-observed key order (including integer-like keys) per SPEC 7.4.3.
+export { parseJSONOrdered } from './json_ordered.js';
 // Generic-profile delta (SPEC Section 10a). Node-only (uses crypto.createHash).
 export {
   genericPackRoot,

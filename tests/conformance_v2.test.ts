@@ -9,13 +9,14 @@ import {
 } from '../src/index.js';
 import type { Payload, Symbol, Edge, DeltaPayload } from '../src/index.js';
 import { packRoot } from '../src/packroot.js';
+import { parseJSONOrdered } from '../src/json_ordered.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
 const fixtureDir = path.resolve(__dirname, '../../gcf/tests/conformance');
 
-function loadFixtures(): Array<{ relPath: string; data: any }> {
-  const fixtures: Array<{ relPath: string; data: any }> = [];
+function loadFixtures(): Array<{ relPath: string; data: any; raw: string }> {
+  const fixtures: Array<{ relPath: string; data: any; raw: string }> = [];
   if (!fs.existsSync(fixtureDir)) return fixtures;
 
   function walk(dir: string) {
@@ -23,12 +24,23 @@ function loadFixtures(): Array<{ relPath: string; data: any }> {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) { walk(full); continue; }
       if (!entry.name.endsWith('.json')) continue;
-      const data = JSON.parse(fs.readFileSync(full, 'utf-8'));
-      fixtures.push({ relPath: path.relative(fixtureDir, full), data });
+      const raw = fs.readFileSync(full, 'utf-8');
+      const data = JSON.parse(raw);
+      fixtures.push({ relPath: path.relative(fixtureDir, full), data, raw });
     }
   }
   walk(fixtureDir);
   return fixtures;
+}
+
+// Re-parse a fixture's `input` field preserving first-observed key order,
+// including integer-like keys (JSON.parse reorders those; SPEC 7.4.3 requires
+// insertion order). The generic encoder is order-sensitive, so encode/roundtrip
+// fixtures must feed order-preserving input, matching the go conformance runner
+// which parses fixtures with ParseJSONOrdered.
+function orderedInput(raw: string): unknown {
+  const fixture = parseJSONOrdered(raw) as Map<string, unknown>;
+  return fixture.get('input');
 }
 
 const fixtures = loadFixtures();
@@ -48,7 +60,7 @@ describe('Conformance v2', () => {
     return;
   }
 
-  for (const { relPath, data } of fixtures) {
+  for (const { relPath, data, raw } of fixtures) {
     const op = data.operation;
     if (data.inputBase64) {
       it.skip(`${relPath} (binary input)`, () => {});
@@ -74,7 +86,8 @@ describe('Conformance v2', () => {
             const got = encode(p);
             expect(got).toBe(data.expected);
           } else {
-            const got = encodeGeneric(data.input);
+            const input = orderedInput(raw);
+            const got = encodeGeneric(input);
             // v3 encoder produces different byte output for nested/attachment fixtures.
             // v3-inline-schema fixtures byte-match; v2 fixtures that exercise nesting only round-trip check.
             const v3AffectedDirs = ['attachments/', 'arrays/'];
@@ -95,7 +108,7 @@ describe('Conformance v2', () => {
         }
         case 'roundtrip': {
           // Encode the input, verify it matches expected, then decode and verify round-trip.
-          const encoded = encodeGeneric(data.input);
+          const encoded = encodeGeneric(orderedInput(raw));
           expect(encoded).toBe(data.expected);
           const decoded = decodeGeneric(encoded);
           expect(jsonNorm(decoded)).toEqual(jsonNorm(data.input));

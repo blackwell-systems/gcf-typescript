@@ -7,6 +7,45 @@ function indent(depth: number): string {
   return '  '.repeat(depth);
 }
 
+// ── Object accessors (Map- and plain-object-aware) ────────────────────────
+// A JSON object reaches the encoder either as a Map (from parseJSONOrdered,
+// which preserves first-observed key order including integer-like keys per
+// SPEC 7.4.3) or as a plain object (from JSON.parse or a JS caller). These
+// helpers read either representation so the encoder stays representation-
+// agnostic; a Map preserves insertion order for every key, a plain object
+// preserves it for all keys except integer-index-like ones (a JS quirk).
+
+/** True if v is a JSON object (Map or plain non-array object), not an array/null. */
+function isObject(v: unknown): boolean {
+  if (v === null || typeof v !== 'object') return false;
+  if (Array.isArray(v)) return false;
+  return true;
+}
+
+/** Keys of a JSON object in iteration order. */
+function objKeys(v: unknown): string[] {
+  if (v instanceof Map) return Array.from(v.keys());
+  return Object.keys(v as Record<string, unknown>);
+}
+
+/** Value for a key, or undefined if absent. */
+function objGet(v: unknown, k: string): unknown {
+  if (v instanceof Map) return v.get(k);
+  return (v as Record<string, unknown>)[k];
+}
+
+/** True if the object has its own entry for the key. */
+function objHas(v: unknown, k: string): boolean {
+  if (v instanceof Map) return v.has(k);
+  return Object.prototype.hasOwnProperty.call(v as Record<string, unknown>, k);
+}
+
+/** [key, value] entries in iteration order. */
+function objEntries(v: unknown): [string, unknown][] {
+  if (v instanceof Map) return Array.from(v.entries());
+  return Object.entries(v as Record<string, unknown>);
+}
+
 /** Options for controlling generic encoding behavior. */
 export interface GenericOptions {
   /** When true, disables promotion of fixed-shape nested objects to path
@@ -25,30 +64,29 @@ export function encodeGeneric(data: unknown, opts?: GenericOptions): string {
 function encodeRootValue(v: unknown, opts?: GenericOptions): string {
   if (v === null || v === undefined) return '=-\n';
   if (Array.isArray(v)) return encodeRootArray(v, opts);
-  if (typeof v === 'object') {
-    const km = keyedMapEligible(v as Record<string, unknown>);
+  if (isObject(v)) {
+    const km = keyedMapEligible(v);
     if (km) return encodeKeyedMap('', false, km, 0, opts);
-    return encodeObject(v as Record<string, unknown>, 0, opts);
+    return encodeObject(v, 0, opts);
   }
   return `=${formatScalar(v, 0)}\n`;
 }
 
-function encodeObject(obj: Record<string, unknown>, depth: number, opts?: GenericOptions): string {
+function encodeObject(obj: unknown, depth: number, opts?: GenericOptions): string {
   const prefix = indent(depth);
   let out = '';
-  for (const key of Object.keys(obj)) {
-    const value = obj[key];
+  for (const [key, value] of objEntries(obj)) {
     const fk = formatKey(key);
     if (Array.isArray(value)) {
       out += encodeNamedArray(fk, value, depth, opts);
-    } else if (typeof value === 'object' && value !== null) {
-      const km = keyedMapEligible(value as Record<string, unknown>);
+    } else if (isObject(value)) {
+      const km = keyedMapEligible(value);
       if (km) {
         out += encodeKeyedMap(key, true, km, depth, opts);
         continue;
       }
       out += `${prefix}## ${fk}\n`;
-      out += encodeObject(value as Record<string, unknown>, depth + 1, opts);
+      out += encodeObject(value, depth + 1, opts);
     } else {
       out += `${prefix}${fk}=${formatScalar(value, 0)}\n`;
     }
@@ -69,8 +107,8 @@ interface KeyedMap {
 // should render as a keyed table `## [N:]{key,...}` (SPEC 7.2a.1). It returns
 // the ordered member keys, the value objects, the value-field union, and the
 // key-column label, or null when the object is not eligible.
-function keyedMapEligible(m: Record<string, unknown>): KeyedMap | null {
-  const keys = Object.keys(m);
+function keyedMapEligible(m: unknown): KeyedMap | null {
+  const keys = objKeys(m);
 
   // A keyed map requires at least two members: the form factors the shared
   // value fields into one header, which only pays off across multiple members.
@@ -83,11 +121,11 @@ function keyedMapEligible(m: Record<string, unknown>): KeyedMap | null {
   const valueFields: string[] = [];
   const seen = new Set<string>();
   for (const k of keys) {
-    const v = m[k];
+    const v = objGet(m, k);
     // Every value must be a non-array object; build the ordered field union.
-    if (v === null || v === undefined || typeof v !== 'object' || Array.isArray(v)) return null;
+    if (!isObject(v)) return null;
     values.push(v);
-    for (const f of Object.keys(v as Record<string, unknown>)) {
+    for (const f of objKeys(v)) {
       if (!seen.has(f)) { seen.add(f); valueFields.push(f); }
     }
   }
@@ -124,10 +162,12 @@ function encodeKeyedMap(name: string, named: boolean, km: KeyedMap, depth: numbe
 function encodeKeyedMapWithPrefix(headerPrefix: string, km: KeyedMap, depth: number, opts?: GenericOptions): string {
   const fields = [km.keyLabel, ...km.valueFields];
   const arr = km.keys.map((k, i) => {
-    // Key column first so it decodes as cell 0; value fields follow in union order.
-    const aug: Record<string, unknown> = { [km.keyLabel]: k };
-    const vo = km.values[i] as Record<string, unknown>;
-    for (const kk of Object.keys(vo)) aug[kk] = vo[kk];
+    // Key column first so it decodes as cell 0; value fields follow in union
+    // order. A Map keeps that order even for integer-like field names.
+    const aug = new Map<string, unknown>();
+    aug.set(km.keyLabel, k);
+    const vo = km.values[i];
+    for (const kk of objKeys(vo)) aug.set(kk, objGet(vo, kk));
     return aug;
   });
   return encodeTabular(headerPrefix, arr, fields, depth, opts, true);
@@ -161,8 +201,8 @@ function tabularFields(arr: unknown[]): string[] | null {
   const fieldOrder: string[] = [];
   const seen = new Set<string>();
   for (const item of arr) {
-    if (typeof item !== 'object' || item === null || Array.isArray(item)) return null;
-    for (const k of Object.keys(item as Record<string, unknown>)) {
+    if (!isObject(item)) return null;
+    for (const k of objKeys(item)) {
       if (!seen.has(k)) { fieldOrder.push(k); seen.add(k); }
     }
   }
@@ -172,21 +212,20 @@ function tabularFields(arr: unknown[]): string[] | null {
 /** Check if a field is eligible for inline schema: all rows have same flat object shape with 3+ keys. */
 function inlineSchemaFields(arr: unknown[], fieldName: string): string[] | null {
   // First row must have the field.
-  const first = arr[0] as Record<string, unknown> | undefined;
-  if (!first || !Object.prototype.hasOwnProperty.call(first, fieldName)) return null;
-  const firstVal = first[fieldName];
-  if (firstVal === null || firstVal === undefined || typeof firstVal !== 'object' || Array.isArray(firstVal)) return null;
+  const first = arr[0];
+  if (first === undefined || !objHas(first, fieldName)) return null;
+  const firstVal = objGet(first, fieldName);
+  if (!isObject(firstVal)) return null;
 
   let canonicalKeys: string[] | null = null;
   for (const item of arr) {
-    const obj = item as Record<string, unknown>;
-    if (!Object.prototype.hasOwnProperty.call(obj, fieldName) || obj[fieldName] === null || obj[fieldName] === undefined) continue;
-    const v = obj[fieldName];
-    if (typeof v !== 'object' || Array.isArray(v)) return null;
-    const keys = Object.keys(v as Record<string, unknown>);
+    if (!objHas(item, fieldName) || objGet(item, fieldName) === null || objGet(item, fieldName) === undefined) continue;
+    const v = objGet(item, fieldName);
+    if (!isObject(v)) return null;
+    const keys = objKeys(v);
     // All values must be scalars.
     for (const k of keys) {
-      const val = (v as Record<string, unknown>)[k];
+      const val = objGet(v, k);
       if (val !== null && val !== undefined && typeof val === 'object') return null;
     }
     if (!canonicalKeys) {
@@ -204,23 +243,22 @@ function inlineSchemaFields(arr: unknown[], fieldName: string): string[] | null 
 
 /** Check if array attachment has same tabular schema across all rows (first row must have it). All values must be scalars. */
 function sharedArraySchema(arr: unknown[], fieldName: string): string[] | null {
-  const first = arr[0] as Record<string, unknown> | undefined;
-  if (!first || !Object.prototype.hasOwnProperty.call(first, fieldName)) return null;
-  const firstVal = first[fieldName];
+  const first = arr[0];
+  if (first === undefined || !objHas(first, fieldName)) return null;
+  const firstVal = objGet(first, fieldName);
   if (!Array.isArray(firstVal)) return null;
 
   let canonicalFields: string[] | null = null;
   for (const item of arr) {
-    const obj = item as Record<string, unknown>;
-    if (!Object.prototype.hasOwnProperty.call(obj, fieldName) || obj[fieldName] === null || obj[fieldName] === undefined) continue;
-    const v = obj[fieldName];
+    if (!objHas(item, fieldName) || objGet(item, fieldName) === null || objGet(item, fieldName) === undefined) continue;
+    const v = objGet(item, fieldName);
     if (!Array.isArray(v)) return null;
     const fields = tabularFields(v);
     if (!fields) return null;
     // All values must be scalars.
     for (const arrItem of v) {
-      if (typeof arrItem !== 'object' || arrItem === null) return null;
-      for (const val of Object.values(arrItem as Record<string, unknown>)) {
+      if (!isObject(arrItem)) return null;
+      for (const val of objKeys(arrItem).map(k => objGet(arrItem, k))) {
         if (val !== null && val !== undefined && typeof val === 'object') return null;
       }
     }
@@ -252,12 +290,14 @@ function isUnsafeKey(k: string): boolean {
 function analyzeFlattenable(arr: unknown[], fieldName: string, parentPath: string): FlatLeaf[] | null {
   // Field names containing ">" cannot be flattened (would create ambiguous paths).
   if (fieldName === '' || fieldName.includes('>')) return null; // empty/'>' key -> ambiguous path (SPEC 7.4.6.1.3)
-  let canonicalShape: Record<string, 'scalar' | 'nested'> | null = null;
+  // A Map preserves first-observed key order (including integer-like keys), so the
+  // flattened path columns come out in insertion order per SPEC 7.4.3; a plain
+  // object would reorder integer-index-like keys ahead of the rest.
+  let canonicalShape: Map<string, 'scalar' | 'nested'> | null = null;
 
   for (const item of arr) {
-    const obj = item as Record<string, unknown>;
-    if (!Object.prototype.hasOwnProperty.call(obj, fieldName) || obj[fieldName] === undefined) continue;
-    if (obj[fieldName] === null) {
+    if (!objHas(item, fieldName) || objGet(item, fieldName) === undefined) continue;
+    if (objGet(item, fieldName) === null) {
       // A nested (non-top-level) null cannot be flattened losslessly: its leaves would
       // encode as absent ("~") and unflatten back to a missing key, not null. Bail to
       // the whole-object (attachment) path. A top-level null is fine: it emits "-" and
@@ -266,32 +306,32 @@ function analyzeFlattenable(arr: unknown[], fieldName: string, parentPath: strin
       if (parentPath !== '') return null;
       continue;
     }
-    const v = obj[fieldName];
-    if (typeof v !== 'object' || Array.isArray(v)) return null;
+    const v = objGet(item, fieldName);
+    if (!isObject(v)) return null;
 
-    const keys = Object.keys(v as Record<string, unknown>);
+    const keys = objKeys(v);
 
     if (!canonicalShape) {
-      // Null-prototype map so `k in canonicalShape` only sees own keys, and reject
-      // prototype-pollution keys outright (never flattened; round-trip whole).
-      canonicalShape = Object.create(null) as Record<string, 'scalar' | 'nested'>;
+      canonicalShape = new Map<string, 'scalar' | 'nested'>();
       for (const k of keys) {
-        if (k === '' || k.includes('>') || isUnsafeKey(k)) return null; // empty/'>' -> ambiguous path (SPEC 7.4.6.1.3)
-        const val = (v as Record<string, unknown>)[k];
+        // Reject empty/'>' (ambiguous path, SPEC 7.4.6.1.3) and prototype-pollution
+        // keys outright (never flattened; round-trip whole).
+        if (k === '' || k.includes('>') || isUnsafeKey(k)) return null;
+        const val = objGet(v, k);
         if (val !== null && val !== undefined && typeof val === 'object' && !Array.isArray(val)) {
-          canonicalShape[k] = 'nested';
+          canonicalShape.set(k, 'nested');
         } else if (Array.isArray(val)) {
           return null;
         } else {
-          canonicalShape[k] = 'scalar';
+          canonicalShape.set(k, 'scalar');
         }
       }
     } else {
-      if (keys.length !== Object.keys(canonicalShape).length) return null;
+      if (keys.length !== canonicalShape.size) return null;
       for (const k of keys) {
-        if (!Object.prototype.hasOwnProperty.call(canonicalShape, k)) return null;
-        const val = (v as Record<string, unknown>)[k];
-        const expected = canonicalShape[k];
+        if (!canonicalShape.has(k)) return null;
+        const val = objGet(v, k);
+        const expected = canonicalShape.get(k);
         if (expected === 'scalar') {
           if (val !== null && val !== undefined && typeof val === 'object') return null;
         } else if (expected === 'nested') {
@@ -309,14 +349,13 @@ function analyzeFlattenable(arr: unknown[], fieldName: string, parentPath: strin
   const parentKeys = parentPath ? [...parentPath.split('>'), fieldName] : [fieldName];
 
   const leaves: FlatLeaf[] = [];
-  for (const k of Object.keys(canonicalShape)) {
-    if (canonicalShape[k] === 'scalar') {
+  for (const [k, shape] of canonicalShape) {
+    if (shape === 'scalar') {
       leaves.push({ path: currentPath + '>' + k, keys: [...parentKeys, k] });
     } else {
       const subArr = arr.map(item => {
-        const obj = item as Record<string, unknown>;
-        if (!Object.prototype.hasOwnProperty.call(obj, fieldName) || obj[fieldName] === null || obj[fieldName] === undefined) return {};
-        return obj[fieldName];
+        if (!objHas(item, fieldName) || objGet(item, fieldName) === null || objGet(item, fieldName) === undefined) return {};
+        return objGet(item, fieldName);
       });
       const subLeaves = analyzeFlattenable(subArr as unknown[], k, currentPath);
       if (!subLeaves || subLeaves.length === 0) return null;
@@ -327,8 +366,7 @@ function analyzeFlattenable(arr: unknown[], fieldName: string, parentPath: strin
   // Guard: reject if any row has non-null object with all-null leaves.
   if (leaves.length > 0) {
     for (const item of arr) {
-      const obj = item as Record<string, unknown>;
-      if (!Object.prototype.hasOwnProperty.call(obj, fieldName) || obj[fieldName] === null || obj[fieldName] === undefined) continue;
+      if (!objHas(item, fieldName) || objGet(item, fieldName) === null || objGet(item, fieldName) === undefined) continue;
       const allNull = leaves.every(leaf => {
         const val = resolveKeyChain(item, leaf.keys);
         return val.exists && val.value === null;
@@ -342,16 +380,14 @@ function analyzeFlattenable(arr: unknown[], fieldName: string, parentPath: strin
 
 function resolveKeyChain(item: unknown, keys: string[]): { value: unknown; exists: boolean } {
   if (keys.length === 0) return { value: undefined, exists: false };
-  const obj = item as Record<string, unknown>;
-  if (typeof obj !== 'object' || obj === null) return { value: undefined, exists: false };
-  if (!Object.prototype.hasOwnProperty.call(obj, keys[0])) return { value: undefined, exists: false };
-  let current: unknown = obj[keys[0]];
+  if (!isObject(item)) return { value: undefined, exists: false };
+  if (!objHas(item, keys[0])) return { value: undefined, exists: false };
+  let current: unknown = objGet(item, keys[0]);
   if (current === null || current === undefined) return { value: current, exists: true };
   for (let i = 1; i < keys.length; i++) {
-    if (typeof current !== 'object' || current === null) return { value: undefined, exists: false };
-    const c = current as Record<string, unknown>;
-    if (!Object.prototype.hasOwnProperty.call(c, keys[i])) return { value: undefined, exists: false };
-    current = c[keys[i]];
+    if (!isObject(current)) return { value: undefined, exists: false };
+    if (!objHas(current, keys[i])) return { value: undefined, exists: false };
+    current = objGet(current, keys[i]);
   }
   return { value: current, exists: true };
 }
@@ -419,7 +455,7 @@ function encodeTabular(headerPrefix: string, arr: unknown[], fields: string[], d
   let out = `${headerPrefix}[${arr.length}${br}{${headerFields.join(',')}}\n`;
 
   for (let i = 0; i < arr.length; i++) {
-    const obj = arr[i] as Record<string, unknown>;
+    const obj = arr[i];
     const cells: string[] = [];
     const attachments: { name: string; value: unknown; inline: boolean; inlineFields?: string[] }[] = [];
     let rowHasAttachment = false;
@@ -427,11 +463,11 @@ function encodeTabular(headerPrefix: string, arr: unknown[], fields: string[], d
     for (const col of columns) {
       if (col.colType === 'flat') {
         // Resolve value via key chain.
-        if (!Object.prototype.hasOwnProperty.call(obj, col.keys[0])) {
+        if (!objHas(obj, col.keys[0])) {
           cells.push('~');
         } else {
           // Check if top-level field is null.
-          const topVal = obj[col.keys[0]];
+          const topVal = objGet(obj, col.keys[0]);
           if (topVal === null || topVal === undefined) {
             cells.push(topVal === null ? '-' : '~');
           } else {
@@ -450,8 +486,8 @@ function encodeTabular(headerPrefix: string, arr: unknown[], fields: string[], d
 
       // Original (non-flattened) field.
       const f = col.field;
-      if (!Object.prototype.hasOwnProperty.call(obj, f)) { cells.push('~'); continue; }
-      const v = obj[f];
+      if (!objHas(obj, f)) { cells.push('~'); continue; }
+      const v = objGet(obj, f);
       if (v === null || v === undefined) { cells.push('-'); continue; }
       if (typeof v === 'object') {
         const ifs = inlineSchemas.get(f);
@@ -476,9 +512,9 @@ function encodeTabular(headerPrefix: string, arr: unknown[], fields: string[], d
     // Emit fields with ">" in their names as per-row attachments.
     for (const f of fields) {
       if (!gtFields.has(f)) continue;
-      if (!Object.prototype.hasOwnProperty.call(obj, f)) continue;
+      if (!objHas(obj, f)) continue;
       rowHasAttachment = true;
-      attachments.push({ name: f, value: obj[f], inline: false });
+      attachments.push({ name: f, value: objGet(obj, f), inline: false });
     }
 
     const row = cells.join('|');
@@ -493,7 +529,7 @@ function encodeTabular(headerPrefix: string, arr: unknown[], fields: string[], d
       if (att.inline && att.inlineFields) {
         // Inline: single pipe-delimited row, no prefix, no indent.
         const vals = att.inlineFields.map(inf => {
-          const val = (att.value as Record<string, unknown>)[inf];
+          const val = objGet(att.value, inf);
           if (val === undefined) return '~';
           return formatScalar(val, 0x7c);
         });
@@ -506,13 +542,13 @@ function encodeTabular(headerPrefix: string, arr: unknown[], fields: string[], d
         } else {
           out += encodeAttachmentArray(prefix, fk, att.value as unknown[], depth + 2, opts);
         }
-      } else if (typeof att.value === 'object' && att.value !== null) {
-        const km = keyedMapEligible(att.value as Record<string, unknown>);
+      } else if (isObject(att.value)) {
+        const km = keyedMapEligible(att.value);
         if (km) {
           out += encodeKeyedMapWithPrefix(`${prefix}.${fk} `, km, depth + 2, opts);
         } else {
           out += `${prefix}.${fk} {}\n`;
-          out += encodeObject(att.value as Record<string, unknown>, depth + 2, opts);
+          out += encodeObject(att.value, depth + 2, opts);
         }
       } else {
         // Scalar attachment (e.g. field names containing ">").
@@ -551,11 +587,11 @@ function encodeAttachmentArrayShared(attPrefix: string, fk: string, arr: unknown
     const prefix = indent(depth);
     let out = `${attPrefix}.${fk} [${arr.length}]\n`;
     for (const item of arr) {
-      const obj = item as Record<string, unknown>;
       const cells = sharedFields.map(f => {
-        if (!Object.prototype.hasOwnProperty.call(obj, f)) return '~';
-        if (obj[f] === null || obj[f] === undefined) return '-';
-        return formatScalar(obj[f], 0x7c);
+        if (!objHas(item, f)) return '~';
+        const val = objGet(item, f);
+        if (val === null || val === undefined) return '-';
+        return formatScalar(val, 0x7c);
       });
       out += `${prefix}${cells.join('|')}\n`;
     }
@@ -572,14 +608,14 @@ function encodeExpanded(headerPrefix: string, arr: unknown[], depth: number, opt
     const item = arr[i];
     if (Array.isArray(item)) {
       out += encodeExpandedArrayItem(prefix, i, item, depth, opts);
-    } else if (typeof item === 'object' && item !== null) {
-      const km = keyedMapEligible(item as Record<string, unknown>);
+    } else if (isObject(item)) {
+      const km = keyedMapEligible(item);
       if (km) {
         out += encodeKeyedMapWithPrefix(`${prefix}@${i} `, km, depth + 1, opts);
         continue;
       }
       out += `${prefix}@${i} {}\n`;
-      out += encodeObject(item as Record<string, unknown>, depth + 1, opts);
+      out += encodeObject(item, depth + 1, opts);
     } else {
       out += `${prefix}@${i} =${formatScalar(item, 0)}\n`;
     }
