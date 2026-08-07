@@ -109,8 +109,8 @@ describe('GenericStreamEncoder field-declaration quoting fuzz', () => {
       enc.endArray();
       enc.close();
 
-      // The streaming encoder omits the profile line; prepend it for decode.
-      const wire = 'GCF profile=generic\n' + output();
+      // The encoder emits the profile line itself; decode the output as-is.
+      const wire = output();
       const decoded = decodeGeneric(wire);
 
       const expected = rows.map((row) => {

@@ -35,6 +35,7 @@ export class GenericStreamEncoder {
 
   constructor(writer: StreamWriter) {
     this.writer = writer;
+    this.writer.write('GCF profile=generic\n');
   }
 
   /** Start a tabular array section with deferred count [?]. */
