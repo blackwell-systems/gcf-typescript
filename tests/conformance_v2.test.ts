@@ -352,6 +352,9 @@ function jsonNorm(v: any): any {
     for (const k of Object.keys(v)) o[k] = jsonNorm(v[k]);
     return o;
   }
+  // Negative zero canonicalizes to 0 (SPEC 2.3.1); -0 and +0 are the same value,
+  // but toEqual distinguishes them via Object.is, so normalize -0 to 0.
+  if (Object.is(v, -0)) return 0;
   return v;
 }
 

@@ -72,7 +72,7 @@ export function formatScalar(v: unknown, delimiter: number = 0): string {
 
 /** Format a number per Section 2.3 canonical rules. */
 export function formatNumber(f: number): string {
-  if (Object.is(f, -0)) return '-0';
+  // Negative zero canonicalizes to 0 (SPEC 2.3.1): -0 equals 0 by value.
   if (f === 0) return '0';
   const abs = Math.abs(f);
   if (abs >= 1e-6 && abs < 1e21) {
