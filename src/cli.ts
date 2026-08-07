@@ -29,6 +29,31 @@ Examples:
   gcf stats payload.json
 `;
 
+// Serialize a decoded value to JSON, preserving object key order exactly as
+// decodeGeneric reconstructed it. decodeGeneric returns a Map for every JSON
+// object so that key order (including integer-like keys like "5", which a plain
+// object would reorder) survives round-trip. JSON.stringify cannot serialize a
+// Map, so emit objects by walking Map entries in insertion order. Scalars and
+// arrays defer to JSON.stringify for correct escaping.
+function stringifyOrdered(v: unknown, indent: number, level = 0): string {
+  const pad = ' '.repeat(indent * level);
+  const padInner = ' '.repeat(indent * (level + 1));
+  if (v instanceof Map) {
+    if (v.size === 0) return '{}';
+    const parts: string[] = [];
+    for (const [k, val] of v) {
+      parts.push(`${padInner}${JSON.stringify(k)}: ${stringifyOrdered(val, indent, level + 1)}`);
+    }
+    return `{\n${parts.join(',\n')}\n${pad}}`;
+  }
+  if (Array.isArray(v)) {
+    if (v.length === 0) return '[]';
+    const parts = v.map(el => `${padInner}${stringifyOrdered(el, indent, level + 1)}`);
+    return `[\n${parts.join(',\n')}\n${pad}]`;
+  }
+  return JSON.stringify(v);
+}
+
 function readInput(args: string[]): string {
   if (args.length > 0 && args[0] !== '-') {
     return readFileSync(args[0]!, 'utf-8');
@@ -125,7 +150,7 @@ switch (cmd) {
     process.stdout.write(encodeGeneric(parseJSONOrdered(readInput(args.slice(1)))));
     break;
   case 'decode-generic':
-    console.log(JSON.stringify(decodeGeneric(readInput(args.slice(1))), null, 2));
+    console.log(stringifyOrdered(decodeGeneric(readInput(args.slice(1))), 2));
     break;
   case 'stats':
     doStats(readInput(args.slice(1)));

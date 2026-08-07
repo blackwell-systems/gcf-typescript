@@ -4,6 +4,20 @@ import {
   isBareKey, MISSING, ATTACHMENT,
 } from './scalar.js';
 
+// Objects decode into Map, not plain objects, so first-observed key order is
+// preserved for every key including integer-like ones ("5", "3"). A plain JS
+// object reorders integer-index-like string keys ahead of the rest in numeric
+// order (a language quirk), which would corrupt object key order on re-encode.
+// The generic encoder is Map-aware (see generic.ts objKeys/objGet), and
+// parseJSONOrdered already returns Map, so Map is this SDK's canonical
+// order-preserving object representation. Object key ordering is a preserved
+// round-trip property (SPEC 52, 931).
+
+// checkDupMap rejects a duplicate key in a decoded object (Map).
+function checkDupMap(m: Map<string, any>, key: string): void {
+  if (m.has(key)) throw new Error(`duplicate_key: ${key}`);
+}
+
 /**
  * Decode GCF generic or graph profile text into a JS value.
  */
@@ -66,7 +80,7 @@ export function decodeGeneric(input: string): any {
     validateSummaryCounts(summaryLine, deferredSectionCount, contentLines);
   }
 
-  if (contentLines.length === 0) return {};
+  if (contentLines.length === 0) return new Map<string, any>();
 
   const first = contentLines[0].trimStart();
 
@@ -83,7 +97,7 @@ export function decodeGeneric(input: string): any {
   }
 
   // Root object.
-  const result: Record<string, any> = {};
+  const result = new Map<string, any>();
   parseObjectBody(contentLines, 0, 0, result);
   return result;
 }
@@ -105,7 +119,7 @@ function parseHeaderProfile(header: string): string {
   return profile;
 }
 
-function parseObjectBody(lines: string[], start: number, depth: number, out: Record<string, any>): number {
+function parseObjectBody(lines: string[], start: number, depth: number, out: Map<string, any>): number {
   const ind = '  '.repeat(depth);
   let i = start;
 
@@ -123,18 +137,18 @@ function parseObjectBody(lines: string[], start: number, depth: number, out: Rec
       const bi = findHeaderBracketStart(hdr);
       if (bi >= 0) {
         const name = parseKeyFromHeader(hdr.slice(0, bi));
-        checkDup(out, name);
+        checkDupMap(out, name);
         const [arr, consumed] = parseArrayFromHeader(lines, i, depth, hdr.slice(bi));
-        safeAssign(out, name, arr);
+        out.set(name, arr);
         i += consumed;
         continue;
       }
       const name = parseKeyFromHeader(hdr);
-      checkDup(out, name);
+      checkDupMap(out, name);
       i++;
-      const nested: Record<string, any> = {};
+      const nested = new Map<string, any>();
       const consumed = parseObjectBody(lines, i, depth + 1, nested);
-      safeAssign(out, name, nested);
+      out.set(name, nested);
       i += consumed;
       continue;
     }
@@ -145,8 +159,8 @@ function parseObjectBody(lines: string[], start: number, depth: number, out: Rec
     const eqIdx = findKeyValueSplit(content);
     if (eqIdx > 0) {
       const name = parseKeyFromHeader(content.slice(0, eqIdx));
-      checkDup(out, name);
-      safeAssign(out, name, parseScalar(content.slice(eqIdx + 1), false));
+      checkDupMap(out, name);
+      out.set(name, parseScalar(content.slice(eqIdx + 1), false));
       i++;
       continue;
     }
@@ -161,9 +175,9 @@ function parseObjectBody(lines: string[], start: number, depth: number, out: Rec
           const after = rest.slice(closeIdx + 1);
           if (after.startsWith(': ') || after === ':') {
             const name = parseKeyFromHeader(content.slice(0, bracketIdx));
-            checkDup(out, name);
+            checkDupMap(out, name);
             const [arr] = parseArrayFromHeader(lines, i, depth, rest);
-            safeAssign(out, name, arr);
+            out.set(name, arr);
             i++;
             continue;
           }
@@ -228,26 +242,11 @@ function parseKeyFromHeader(s: string): string {
   return s;
 }
 
-function checkDup(obj: Record<string, any>, key: string): void {
-  // Own-property check only: `key in obj` fires on inherited names like
-  // "toString"/"constructor" and would mislabel them as duplicates.
-  if (Object.prototype.hasOwnProperty.call(obj, key)) throw new Error(`duplicate_key: ${key}`);
-}
-
-// A path segment that would pollute Object.prototype if written through.
+// A path segment that would pollute Object.prototype if it were ever written
+// through a plain object. Decoded objects are Maps (Map.set cannot touch the
+// prototype chain), but this still filters hostile flatten path segments.
 function isUnsafePathKey(k: string): boolean {
   return k === '__proto__' || k === 'constructor' || k === 'prototype';
-}
-
-// Assign a decoded key without ever mutating Object.prototype: a literal
-// "__proto__" key is written as an own data property (matching JSON.parse
-// semantics) instead of reassigning the prototype. All other keys are safe.
-function safeAssign(obj: Record<string, unknown>, key: string, value: unknown): void {
-  if (key === '__proto__') {
-    Object.defineProperty(obj, key, { value, writable: true, enumerable: true, configurable: true });
-  } else {
-    obj[key] = value;
-  }
 }
 
 function parseArrayFromHeader(lines: string[], headerLine: number, depth: number, bracketPart: string): [any, number] {
@@ -314,28 +313,27 @@ function parseArrayFromHeader(lines: string[], headerLine: number, depth: number
 // the first declared field is the member key; the remaining fields form the value
 // object. The key-column label is discarded from every value object. Duplicate
 // member keys are rejected.
-function keyedRowsToMap(rows: any[], fields: string[]): Record<string, any> {
+function keyedRowsToMap(rows: Array<Map<string, any>>, fields: string[]): Map<string, any> {
   // A keyed header MUST declare at least two fields: the key column plus at
   // least one value field (SPEC 7.2a.2).
   if (fields.length < 2) throw new Error('keyed_map: header must declare at least two fields');
   const keyLabel = fields[0];
-  const out: Record<string, any> = {};
+  const out = new Map<string, any>();
   for (const row of rows) {
     // parseTabularBody omits an absent (~) cell; a keyed row always carries the
     // key cell (a scalar per SPEC 7.2a.3), so read it directly.
-    const kv = Object.prototype.hasOwnProperty.call(row, keyLabel) ? row[keyLabel] : undefined;
+    const kv = row.has(keyLabel) ? row.get(keyLabel) : undefined;
     const ks = typeof kv === 'string' ? kv : String(kv);
-    // safeAssign writes even a "__proto__" member as an own data property, so a
-    // plain own-property check catches duplicates for every key without ever
-    // touching the prototype chain.
-    if (Object.prototype.hasOwnProperty.call(out, ks)) throw new Error(`keyed_map: duplicate member key ${ks}`);
+    if (out.has(ks)) throw new Error(`keyed_map: duplicate member key ${ks}`);
     // Strip the key-column label so it is not emitted as a value-object member.
-    const value: Record<string, any> = {};
-    for (const f of Object.keys(row)) {
+    // The row Map already preserves declared field order, so the value object
+    // keeps the value fields in that order (SPEC 7.2a.4).
+    const value = new Map<string, any>();
+    for (const [f, v] of row) {
       if (f === keyLabel) continue;
-      safeAssign(value, f, row[f]);
+      value.set(f, v);
     }
-    safeAssign(out, ks, value);
+    out.set(ks, value);
   }
   return out;
 }
@@ -351,11 +349,16 @@ function findClosingBrace(s: string): number {
   return -1;
 }
 
+// unflattenPaths reconstructs the nested objects encoded as ">"-path columns.
+// It returns a Map keyed by the top-level parent name (in first-observed order),
+// so the row assembler can splice each group into the row at the declared
+// position of its first path column. Nested leaf order follows path-column order
+// (SPEC 7.4.6.1). Objects are Maps so integer-like leaf keys keep their order.
 function unflattenPaths(
   pathColumns: Map<string, string[]>,
   flatValues: Map<string, any>,
   flatAbsent: Set<string>,
-): Record<string, any> {
+): Map<string, any> {
   // Group by top-level parent.
   const groups = new Map<string, string[]>();
   const groupOrder: string[] = [];
@@ -372,7 +375,7 @@ function unflattenPaths(
     groups.get(top)!.push(fieldName);
   }
 
-  const result: Record<string, any> = {};
+  const result = new Map<string, any>();
 
   for (const top of groupOrder) {
     const fieldNames = groups.get(top)!;
@@ -384,7 +387,7 @@ function unflattenPaths(
     });
 
     if (allAbsent) continue;
-    if (allNull) { result[top] = null; continue; }
+    if (allNull) { result.set(top, null); continue; }
 
     for (const fieldName of fieldNames) {
       if (flatAbsent.has(fieldName)) continue;
@@ -394,20 +397,16 @@ function unflattenPaths(
       let current = result;
       for (let k = 0; k < paths.length - 1; k++) {
         const segment = paths[k];
-        const existing = current[segment];
-        // Overwrite with a fresh object when the slot is missing OR holds a
-        // non-object, so traversal never dereferences a primitive on malformed
+        const existing = current.get(segment);
+        // Overwrite with a fresh Map when the slot is missing OR holds a
+        // non-Map, so traversal never dereferences a primitive on malformed
         // input. Conformant output never hits this.
-        if (
-          !Object.prototype.hasOwnProperty.call(current, segment) ||
-          existing === null ||
-          typeof existing !== 'object'
-        ) {
-          current[segment] = {};
+        if (!current.has(segment) || !(existing instanceof Map)) {
+          current.set(segment, new Map<string, any>());
         }
-        current = current[segment];
+        current = current.get(segment);
       }
-      current[paths[paths.length - 1]] = val;
+      current.set(paths[paths.length - 1], val);
     }
   }
 
@@ -568,10 +567,10 @@ function parseTabularBody(lines: string[], start: number, depth: number, fields:
             const data = afterName.trimStart();
             const inlineVals = splitRespectingQuotes(data, '|');
             if (inlineVals.length !== ifs.length) throw new Error(`inline_width_mismatch: ${attName} expected ${ifs.length}, got ${inlineVals.length}`);
-            const obj: Record<string, any> = {};
+            const obj = new Map<string, any>();
             for (let k = 0; k < ifs.length; k++) {
               const p = parseScalar(inlineVals[k], true);
-              if (p !== MISSING) obj[ifs[k]] = p;
+              if (p !== MISSING) obj.set(ifs[k], p);
             }
             if (attachmentValues.has(attName)) throw new Error(`duplicate_attachment: ${attName}`);
             attachmentValues.set(attName, obj);
@@ -608,10 +607,10 @@ function parseTabularBody(lines: string[], start: number, depth: number, fields:
         const ifs = inlineSchemas.get(nextInlineField)!;
         const inlineVals = splitRespectingQuotes(aContent, '|');
         if (inlineVals.length !== ifs.length) throw new Error(`inline_width_mismatch: ${nextInlineField} expected ${ifs.length}, got ${inlineVals.length}`);
-        const obj: Record<string, any> = {};
+        const obj = new Map<string, any>();
         for (let k = 0; k < ifs.length; k++) {
           const p = parseScalar(inlineVals[k], true);
-          if (p !== MISSING) obj[ifs[k]] = p;
+          if (p !== MISSING) obj.set(ifs[k], p);
         }
         attachmentValues.set(nextInlineField, obj);
         inlineIdx++;
@@ -646,25 +645,36 @@ function parseTabularBody(lines: string[], start: number, depth: number, fields:
       }
     }
 
-    // Build row in field declaration order.
-    const row: Record<string, any> = {};
+    // Reconstruct the row in declared field-union order. A flattened group is
+    // emitted at the position of its first path column, so the nested object
+    // reappears where the original field was rather than being appended at the
+    // end. Nested leaf order follows path-column order. Scalars and attachments
+    // stay at their declared position; absent (~) cells are skipped. Object key
+    // ordering is a preserved round-trip property (SPEC 7.4.6.1, SPEC 52, 931).
+    const nested = pathColumnMap.size > 0
+      ? unflattenPaths(pathColumnMap, flatValues, flatAbsent)
+      : new Map<string, any>();
+    const emittedGroups = new Set<string>();
+    const row = new Map<string, any>();
     for (const f of fields) {
-      if (missingFields.has(f)) continue;
-      if (cellValues.has(f)) { safeAssign(row, f, cellValues.get(f)); continue; }
-      if (attachmentValues.has(f)) { safeAssign(row, f, attachmentValues.get(f)); continue; }
-    }
-
-    // Also add any orphan attachment values (fields excluded from column list, e.g. ">" fields).
-    for (const [k, v] of attachmentValues) {
-      if (!Object.prototype.hasOwnProperty.call(row, k)) safeAssign(row, k, v);
-    }
-
-    // Unflatten path columns into nested objects.
-    if (pathColumnMap.size > 0) {
-      const nested = unflattenPaths(pathColumnMap, flatValues, flatAbsent);
-      for (const [k, v] of Object.entries(nested)) {
-        safeAssign(row, k, v);
+      // Path column: emit its top-level group once, at the first path column.
+      if (pathColumnMap.has(f)) {
+        const top = pathColumnMap.get(f)![0];
+        if (emittedGroups.has(top)) continue;
+        emittedGroups.add(top);
+        // A wholly-absent group is omitted (unflattenPaths drops it).
+        if (nested.has(top)) row.set(top, nested.get(top));
+        continue;
       }
+      if (missingFields.has(f)) continue;
+      if (cellValues.has(f)) { row.set(f, cellValues.get(f)); continue; }
+      if (attachmentValues.has(f)) { row.set(f, attachmentValues.get(f)); continue; }
+    }
+
+    // Also add any orphan attachment values (fields excluded from the column
+    // list, e.g. ">" flatten-fallback attachments) after the declared columns.
+    for (const [k, v] of attachmentValues) {
+      if (!row.has(k)) row.set(k, v);
     }
 
     rows.push(row);
@@ -695,7 +705,7 @@ function parseAttachment(lines: string[], lineIdx: number, rest: string, depth: 
   const afterName = afterNameRaw.trimStart();
 
   if (afterName.startsWith('{}')) {
-    const nested: Record<string, any> = {};
+    const nested = new Map<string, any>();
     const consumed = parseObjectBody(lines, lineIdx + 1, depth, nested);
     return [name, nested, consumed + 1, null];
   }
@@ -799,7 +809,7 @@ function parseExpandedBody(lines: string[], start: number, depth: number): [any[
       continue;
     }
     if (marker.startsWith('{}')) {
-      const nested: Record<string, any> = {};
+      const nested = new Map<string, any>();
       i++;
       const consumed = parseObjectBody(lines, i, depth + 1, nested);
       items.push(nested);

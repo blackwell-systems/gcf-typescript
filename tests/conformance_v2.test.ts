@@ -98,6 +98,12 @@ describe('Conformance v2', () => {
             // Round-trip (all fixtures must pass this).
             const decoded = decodeGeneric(got);
             expect(jsonNorm(decoded)).toEqual(jsonNorm(data.input));
+            // Re-encode idempotence: encodeGeneric(decodeGeneric(got)) === got.
+            // Order-sensitive, so it catches a decoder that drops object field
+            // order (which jsonNorm/toEqual, comparing through unordered objects,
+            // cannot). Object key ordering is a preserved round-trip property
+            // (SPEC 52, 931).
+            expect(encodeGeneric(decoded)).toBe(got);
           }
           break;
         }
@@ -112,6 +118,8 @@ describe('Conformance v2', () => {
           expect(encoded).toBe(data.expected);
           const decoded = decodeGeneric(encoded);
           expect(jsonNorm(decoded)).toEqual(jsonNorm(data.input));
+          // Re-encode idempotence (order-sensitive); see the `encode` case.
+          expect(encodeGeneric(decoded)).toBe(encoded);
           break;
         }
         case 'error': {
@@ -328,8 +336,23 @@ describe('Conformance v2', () => {
   }
 });
 
+// Normalize a decoded value for structural (order-insensitive) comparison.
+// decodeGeneric returns Map for every JSON object (to preserve key order,
+// including integer-like keys, on re-encode), so collapse Maps to plain objects
+// before comparing. Recurses through arrays and nested Maps.
 function jsonNorm(v: any): any {
-  return JSON.parse(JSON.stringify(v));
+  if (v instanceof Map) {
+    const o: Record<string, any> = {};
+    for (const [k, val] of v) o[k] = jsonNorm(val);
+    return o;
+  }
+  if (Array.isArray(v)) return v.map(jsonNorm);
+  if (v && typeof v === 'object') {
+    const o: Record<string, any> = {};
+    for (const k of Object.keys(v)) o[k] = jsonNorm(v[k]);
+    return o;
+  }
+  return v;
 }
 
 function jsonSubset(expected: any, got: any): boolean {
