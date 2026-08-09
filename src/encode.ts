@@ -1,4 +1,5 @@
 import type { Payload, Symbol } from './types.js';
+import { formatScore } from './scalar.js';
 import { KIND_ABBREV } from './constants.js';
 
 interface DistanceGroup {
@@ -77,7 +78,7 @@ export function encode(p: Payload): string {
     for (const s of g.symbols) {
       const idx = symIndex.get(s.qualifiedName)!;
       const kind = KIND_ABBREV[s.kind] || s.kind;
-      lines.push(`@${idx} ${kind} ${s.qualifiedName} ${s.score.toFixed(2)} ${s.provenance}`);
+      lines.push(`@${idx} ${kind} ${s.qualifiedName} ${formatScore(s.score)} ${s.provenance}`);
     }
   }
 

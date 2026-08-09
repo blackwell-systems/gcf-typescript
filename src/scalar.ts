@@ -90,6 +90,37 @@ function toPreciseDecimal(f: number): string {
   return String(f);
 }
 
+/**
+ * Format a graph score to exactly two decimals with round-half-to-even applied to
+ * the exact IEEE-754 double (SPEC 5). This matches the C/Go printf family, Python,
+ * Rust, and .NET. It deliberately does NOT use Number.prototype.toFixed, which
+ * rounds half-up and diverges at exact binary midpoints (0.125 -> 0.12 not 0.13,
+ * 0.625 -> 0.62 not 0.63), producing a non-interoperable wire.
+ */
+export function formatScore(x: number): string {
+  if (!Number.isFinite(x)) return '0.00';
+  const neg = x < 0;
+  const a = Math.abs(x);
+  // Exact decimal expansion of the double, far enough to decide 2-decimal rounding.
+  const exp = a.toFixed(20);
+  const dot = exp.indexOf('.');
+  const intPart = exp.slice(0, dot);
+  const frac = exp.slice(dot + 1);
+  const keep = frac.slice(0, 2).padEnd(2, '0');
+  const rest = frac.slice(2);
+  const firstRest = rest.charCodeAt(0) - 48;
+  let roundUp: boolean;
+  if (firstRest > 5) roundUp = true;
+  else if (firstRest < 5) roundUp = false;
+  else if (/[1-9]/.test(rest.slice(1))) roundUp = true; // strictly greater than .5
+  else roundUp = ((keep.charCodeAt(1) - 48) % 2) === 1; // exact tie -> round to even
+  let cents = parseInt(intPart, 10) * 100 + parseInt(keep, 10);
+  if (roundUp) cents += 1;
+  const whole = Math.floor(cents / 100);
+  const frac2 = (cents % 100).toString().padStart(2, '0');
+  return `${neg ? '-' : ''}${whole}.${frac2}`;
+}
+
 const BARE_KEY_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
 /** Check if a key is a valid bare key. */

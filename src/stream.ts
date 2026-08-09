@@ -1,4 +1,5 @@
 import { KIND_ABBREV } from './constants.js';
+import { formatScore } from './scalar.js';
 import type { Symbol, Edge } from './types.js';
 
 /**
@@ -84,7 +85,7 @@ export class StreamEncoder {
     this.symIndex.set(s.qualifiedName, id);
 
     const kind = KIND_ABBREV[s.kind] || s.kind;
-    this.w.write(`@${id} ${kind} ${s.qualifiedName} ${s.score.toFixed(2)} ${s.provenance}\n`);
+    this.w.write(`@${id} ${kind} ${s.qualifiedName} ${formatScore(s.score)} ${s.provenance}\n`);
 
     this.groupCounts.set(groupName, (this.groupCounts.get(groupName) || 0) + 1);
   }

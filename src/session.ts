@@ -1,4 +1,5 @@
 import type { Payload, Symbol } from './types.js';
+import { formatScore } from './scalar.js';
 import { KIND_ABBREV } from './constants.js';
 import { encode } from './encode.js';
 
@@ -140,7 +141,7 @@ export function encodeWithSession(p: Payload, sess: Session | null): string {
       } else {
         // Full declaration.
         const kind = KIND_ABBREV[s.kind] || s.kind;
-        lines.push(`@${idx} ${kind} ${s.qualifiedName} ${s.score.toFixed(2)} ${s.provenance}`);
+        lines.push(`@${idx} ${kind} ${s.qualifiedName} ${formatScore(s.score)} ${s.provenance}`);
         newSymbols.push(s);
       }
     }

@@ -1,4 +1,5 @@
 import type { DeltaPayload, Symbol, Edge } from './types.js';
+import { formatScore } from './scalar.js';
 import { KIND_ABBREV, KIND_EXPAND } from './constants.js';
 import { packRoot } from './packroot.js';
 
@@ -51,7 +52,7 @@ export function encodeDelta(d: DeltaPayload): string {
     for (let i = 0; i < d.added.length; i++) {
       const s = d.added[i];
       const kind = KIND_ABBREV[s.kind] || s.kind;
-      lines.push(`@${i} ${kind} ${s.qualifiedName} ${s.score.toFixed(2)} ${s.provenance} ${s.distance}`);
+      lines.push(`@${i} ${kind} ${s.qualifiedName} ${formatScore(s.score)} ${s.provenance} ${s.distance}`);
     }
   }
 
