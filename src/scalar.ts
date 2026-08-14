@@ -7,6 +7,47 @@ const JSON_NUMBER_RE = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
 const NUMERIC_LIKE_RE = /^[+-]\.?\d|^\.\d|^0\d/;
 const INLINE_ARRAY_RE = /\[[^\]]*\]\s*:/;
 
+// Numeric domain (SPEC 2.3.2). The canonical integer domain is signed int64. In this
+// SDK the native number is a binary64, exact only to 2^53-1, so an in-domain integer
+// whose magnitude exceeds 2^53-1 (the [2^53, 2^63-1] and [-2^63, -2^53] sub-ranges)
+// cannot be held as a `number` without loss and is governed by a documented policy.
+const I64_MIN = -9223372036854775808n; // -2^63
+const I64_MAX = 9223372036854775807n; //  2^63-1
+const MAX_SAFE = 9007199254740991n; //  2^53-1
+
+/**
+ * Policy for an in-domain integer whose magnitude exceeds 2^53-1 (a value the host
+ * `number` cannot hold exactly). This is a JavaScript-local boundary, not the numeric
+ * domain edge (which is int64 and is enforced regardless of this policy). SPEC 2.3.2.
+ * - `'error'` (default): throw rather than return a value that would later lose
+ *   precision in `number` arithmetic.
+ * - `'string'`: return the decimal digits as a string (recommended for identifiers).
+ * - `'bigint'`: return a native `bigint` (lossless, for consumers that compute on it).
+ * - `'number'`: return a `number` (explicit, lossy).
+ */
+export type LargeIntMode = 'error' | 'string' | 'bigint' | 'number';
+
+// Decode-wide policy for the current decode. Set by the decode entry points before
+// parsing and reset afterwards; read by parseScalar. Decode is synchronous and
+// non-reentrant, so a module-scoped value is safe and avoids threading the mode
+// through every internal decode helper.
+let currentLargeInt: LargeIntMode = 'error';
+
+/** Set the large-integer policy for the current decode (see LargeIntMode). */
+export function setLargeIntMode(mode: LargeIntMode): void {
+  currentLargeInt = mode;
+}
+
+/** Build the actionable out-of-range message for a value outside the int64 domain. */
+function outOfRangeMessage(value: string): string {
+  return `out_of_range: integer ${value} is outside the canonical int64 domain [-9223372036854775808, 9223372036854775807]; model larger values as strings (SPEC 2.3.2)`;
+}
+
+/** Build the message for an in-domain value the host `number` cannot hold exactly. */
+function unsafeIntegerMessage(value: string): string {
+  return `unsafe_integer: integer ${value} exceeds the safe-integer range (2^53-1) of a JavaScript number; decode with largeInt 'string' | 'bigint' | 'number', or model the value as a string (SPEC 2.3.2)`;
+}
+
 /** Check if a string value must be quoted per Section 2.4. */
 export function needsQuote(s: string): boolean {
   if (s === '') return true;
@@ -63,6 +104,13 @@ export function formatScalar(v: unknown, delimiter: number = 0): string {
   if (v === null || v === undefined) return '-';
   if (typeof v === 'boolean') return v ? 'true' : 'false';
   if (typeof v === 'number') return formatNumber(v);
+  // A bigint is the exact-integer type: serialize its exact digits across the whole
+  // closed int64 interval (including -2^63), and reject a bigint outside int64 with an
+  // out-of-range error rather than emitting a bare token the decoder rejects (SPEC 2.3.2).
+  if (typeof v === 'bigint') {
+    if (v < I64_MIN || v > I64_MAX) throw new Error(outOfRangeMessage(v.toString()));
+    return v.toString();
+  }
   const s = String(v);
   if (needsQuote(s) || (delimiter && s.includes(String.fromCharCode(delimiter)))) {
     return quoteString(s);
@@ -75,7 +123,12 @@ export function formatNumber(f: number): string {
   // Negative zero canonicalizes to 0 (SPEC 2.3.1): -0 equals 0 by value.
   if (f === 0) return '0';
   const abs = Math.abs(f);
-  if (abs >= 1e-6 && abs < 1e21) {
+  // Plain decimal only below 2^53. Every double at or above 2^53 is integer-valued,
+  // so a plain rendering would emit a bare-integer token: indistinguishable from an
+  // int64 on the wire and beyond this host's safe-integer range (2^53-1), so a
+  // JavaScript decoder rejects it under its default policy. Exponent shape keeps bare
+  // tokens int64 and decimal/exponent tokens doubles (SPEC 2.3.1). 2^53 = 9007199254740992.
+  if (abs >= 1e-6 && abs < 9007199254740992) {
     return toPreciseDecimal(f);
   }
   // Exponent notation.
@@ -163,8 +216,26 @@ export function parseScalar(s: string, tabularContext: boolean): any {
   if (s === 'true') return true;
   if (s === 'false') return false;
 
-  // 6. Number.
+  // 6. Number. Token shape follows the numeric domain (SPEC 2.3.2): a bare-integer
+  // literal (no fraction, no exponent) is an int64-domain integer; a decimal or
+  // exponent literal is a double.
   if (JSON_NUMBER_RE.test(s)) {
+    if (!s.includes('.') && !s.includes('e') && !s.includes('E')) {
+      const b = BigInt(s); // exact; `-0` parses to 0n
+      if (b < I64_MIN || b > I64_MAX) throw new Error(outOfRangeMessage(s));
+      // Within the safe-integer range: a plain number is exact and idiomatic.
+      if (b >= -MAX_SAFE && b <= MAX_SAFE) return Number(b);
+      // In-domain but beyond 2^53-1: the host number cannot hold it exactly, so apply
+      // the documented large-integer policy (SPEC 2.3.2).
+      switch (currentLargeInt) {
+        case 'string': return s;
+        case 'bigint': return b;
+        case 'number': return Number(b);
+        case 'error':
+        default:
+          throw new Error(unsafeIntegerMessage(s));
+      }
+    }
     const f = Number(s);
     if (!isNaN(f)) return f;
   }

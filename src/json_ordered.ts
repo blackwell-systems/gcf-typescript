@@ -152,7 +152,7 @@ class Parser {
     throw new SyntaxError(`Unterminated string in JSON at position ${start}`);
   }
 
-  parseNumber(): number {
+  parseNumber(): number | bigint {
     const start = this.pos;
     const re = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
     re.lastIndex = this.pos;
@@ -161,7 +161,20 @@ class Parser {
       throw new SyntaxError(`Unexpected token in JSON at position ${start}`);
     }
     this.pos += m[0].length;
-    return Number(m[0]);
+    const tok = m[0];
+    // Token shape follows the numeric domain (SPEC 2.3.2): a bare-integer literal (no
+    // fraction, no exponent) is an int64-domain integer. This bridge ingests JSON for
+    // encoding, so it preserves such a value exactly: as a number within the safe range
+    // and as a bigint beyond it (rather than floating it through Number), and rejects a
+    // value outside int64. A decimal or exponent literal is a double.
+    if (!tok.includes('.') && !tok.includes('e') && !tok.includes('E')) {
+      const b = BigInt(tok);
+      if (b < -9223372036854775808n || b > 9223372036854775807n) {
+        throw new Error(`out_of_range: integer ${tok} is outside the canonical int64 domain [-9223372036854775808, 9223372036854775807]; model larger values as strings (SPEC 2.3.2)`);
+      }
+      return b >= -9007199254740991n && b <= 9007199254740991n ? Number(b) : b;
+    }
+    return Number(tok);
   }
 
   parseLiteral<T>(word: string, value: T): T {

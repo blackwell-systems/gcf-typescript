@@ -1,7 +1,7 @@
 import { decode } from './decode.js';
 import {
   parseScalar, parseQuotedString, splitRespectingQuotes, splitFieldDecl,
-  isBareKey, MISSING, ATTACHMENT,
+  isBareKey, MISSING, ATTACHMENT, setLargeIntMode, type LargeIntMode,
 } from './scalar.js';
 
 // Objects decode into Map, not plain objects, so first-observed key order is
@@ -20,8 +20,20 @@ function checkDupMap(m: Map<string, any>, key: string): void {
 
 /**
  * Decode GCF generic or graph profile text into a JS value.
+ *
+ * `opts.largeInt` sets the policy for an in-domain integer whose magnitude exceeds
+ * this host's safe-integer range (2^53-1); it defaults to `'error'`. See LargeIntMode.
  */
-export function decodeGeneric(input: string): any {
+export function decodeGeneric(input: string, opts?: { largeInt?: LargeIntMode }): any {
+  setLargeIntMode(opts?.largeInt ?? 'error');
+  try {
+    return decodeGenericImpl(input);
+  } finally {
+    setLargeIntMode('error');
+  }
+}
+
+function decodeGenericImpl(input: string): any {
   input = input.trimEnd();
   if (!input) throw new Error('missing_header: empty input');
 

@@ -99,9 +99,11 @@ describe('Conformance v2', () => {
             if (!isV3Affected) {
               expect(got).toBe(data.expected);
             }
-            // Round-trip (all fixtures must pass this).
-            const decoded = decodeGeneric(got);
-            expect(jsonNorm(decoded)).toEqual(jsonNorm(data.input));
+            // Round-trip (all fixtures must pass this). Decode in bigint mode so an
+            // in-domain int64 value beyond 2^53 survives losslessly, and compare against
+            // the order- and precision-preserving parse (JSON.parse floats such values).
+            const decoded = decodeGeneric(got, { largeInt: 'bigint' });
+            expect(jsonNorm(decoded)).toEqual(jsonNorm(orderedInput(raw)));
             // Re-encode idempotence: encodeGeneric(decodeGeneric(got)) === got.
             // Order-sensitive, so it catches a decoder that drops object field
             // order (which jsonNorm/toEqual, comparing through unordered objects,
@@ -133,6 +135,22 @@ describe('Conformance v2', () => {
           // v3 decoder may surface different error categories for the same invalid input.
           // The requirement is that it rejects; the exact category may differ.
           expect(() => decodeGeneric(inputStr)).toThrow();
+          break;
+        }
+        case 'roundtrip-wire': {
+          // input and expected are both wire strings. Decode the input wire, re-encode,
+          // and require the result to equal expected. Decode in bigint mode so an
+          // int64 value beyond this host's safe range survives (in the default 'error'
+          // mode a JavaScript decoder rejects it; that default is exercised separately).
+          const decoded = decodeGeneric(data.input, { largeInt: 'bigint' });
+          expect(encodeGeneric(decoded)).toBe(data.expected);
+          break;
+        }
+        case 'encode-error': {
+          // input is a JSON value out of the numeric domain; ingesting it through the
+          // JSON->value bridge (parseJSONOrdered, via orderedInput) then encoding it
+          // must throw. The value never becomes an approximate host number.
+          expect(() => encodeGeneric(orderedInput(raw))).toThrow();
           break;
         }
         case 'generic-pack-root': {

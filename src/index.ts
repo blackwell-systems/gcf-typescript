@@ -33,6 +33,6 @@ export {
   type ReanchorPolicy,
   type SessionEmission,
 } from './generic_delta_session.js';
-export { formatScalar, formatKey, parseScalar, needsQuote, quoteString } from './scalar.js';
+export { formatScalar, formatKey, parseScalar, needsQuote, quoteString, type LargeIntMode } from './scalar.js';
 export { StreamEncoder, type StreamWriter, type StreamOptions } from './stream.js';
 export { GenericStreamEncoder } from './stream_generic.js';
