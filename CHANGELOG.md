@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.6.0 (2026-08-14)
+
+- **Numeric domain (spec v3.5.3, SPEC 2.3.2).** Specifies the canonical numeric domain as signed `int64` for integers and IEEE-754 double for non-integers. Earlier versions left integers beyond the double-exact range (2^53) to the host numeric type; this version parses integer literals to an exact `int64` on decode and on the JSON-to-value bridge, returns an out-of-range error for a value outside `int64` on both decode and encode, and models larger values (unsigned-64 identifiers, exact decimals) as strings. Canonical number formatting aligns to the domain: a double at or above 2^53 renders in exponent notation. Verified against new `numbers/017-024` and `errors-v2/041-042` conformance fixtures and the cross-SDK differential fuzz. Adds a `largeInt` decode option (`decodeGeneric` `opts.largeInt`: `'error'` default, `'string'`, `'bigint'`, `'number'`) for an in-domain integer beyond the JavaScript 2^53 safe range; a `bigint` is accepted and serialized on encode.
+
 ## v2.5.2 (2026-08-09)
 
 - **Score rounding fix (SPEC 5, spec v3.5.1 errata).** The graph node-line `score` now rounds half-to-even on the exact IEEE-754 double, matching the Go/Rust/Python/Swift/.NET reference. The previous `Number.prototype.toFixed` formatter rounded half-up, so it diverged at exact binary midpoints (`0.125` -> `0.13` instead of `0.12`, `0.625` -> `0.63` instead of `0.62`) - a silent, non-interoperable wire difference. Pinned by the new `graph-encode/004_score_midpoint_rounding` conformance fixture. Encoding is unchanged for every non-midpoint score.
