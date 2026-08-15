@@ -187,7 +187,7 @@ function parseObjectBody(lines: string[], start: number, depth: number, out: Map
 
     // Inline array (e.g. items[3]: a,b,c). Only reached if no = found.
     if (!content.startsWith('@') && !content.startsWith('##')) {
-      const bracketIdx = content.indexOf('[');
+      const bracketIdx = arrayBracketStart(content);
       if (bracketIdx > 0) {
         const rest = content.slice(bracketIdx);
         const closeIdx = rest.indexOf(']');
@@ -241,6 +241,26 @@ function findKeyValueSplit(s: string): number {
 // A section header whose name is a quoted string containing " [" (e.g. `## " [9]"`)
 // would otherwise be misread as a named-array header and reject a valid payload.
 // Returns the index of the separating space, or -1 for a plain object section.
+// Index of the '[' that opens a named-array marker (name[N]:), scanning past a
+// quoted key so a '[' inside the key name is not mistaken for the array bracket
+// (SPEC 4.2). Bare keys cannot contain '['. Returns -1 when not found.
+function arrayBracketStart(content: string): number {
+  if (content.charCodeAt(0) === 0x22 /* " */) {
+    let escaped = false;
+    for (let i = 1; i < content.length; i++) {
+      if (escaped) {
+        escaped = false;
+      } else if (content[i] === '\\') {
+        escaped = true;
+      } else if (content[i] === '"') {
+        return content[i + 1] === '[' ? i + 1 : -1;
+      }
+    }
+    return -1;
+  }
+  return content.indexOf('[');
+}
+
 function findHeaderBracketStart(hdr: string): number {
   let i = 0;
   // Skip a leading quoted key so a " [" inside it is treated as data, not syntax.
